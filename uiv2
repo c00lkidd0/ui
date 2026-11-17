@@ -42,6 +42,20 @@ end
 local genv = (getgenv and getgenv()) or _G
 local live_connections = {}
 local library_alive = true
+local window_resize_listeners = {}
+
+local exec_id = 8
+pcall(function()
+	local gid = getthreadidentity or getidentity or getthreadcontext
+	if gid then exec_id = gid() or 8 end
+end)
+
+local function restore_id()
+	pcall(function()
+		local sid = setthreadidentity or setidentity or setthreadcontext
+		if sid then sid(exec_id) end
+	end)
+end
 
 local function track_conn(conn)
 	if conn then live_connections[conn] = true end
@@ -74,8 +88,253 @@ local function on_slow_tick(fn)
 	return fn
 end
 
+local KNOWN_G_KEYS = {
+	"rage_enabled", "rage_autoshoot", "rage_autoreload", "rage_reload_at",
+	"rage_autostop", "rage_stopmode", "rage_autocrouch", "rage_autoscope",
+	"rage_autowall", "rage_minpen", "rage_maxwalls", "rage_mindmg",
+	"rage_ovr_active", "rage_ovr_dmg", "rage_baim_hp", "rage_baim_air",
+	"rage_resolver", "rage_doubletap", "rage_multipoint", "rage_mpscale",
+	"rage_predict", "pred_mode", "pred_lead_ms", "rage_fov",
+	"rage_hitchance", "rage_prio", "rage_part", "rage_maxdist",
+	"rage_zombies", "rage_bots", "rage_airshoot", "rage_ratemode",
+	"rage_delayms", "killfeed_scope", "autopeek", "buybot",
+	"buy_primary", "buy_secondary", "buy_armor", "buy_kit", "buy_nade",
+	"sa_enabled", "sa_hitchance", "sa_hschance", "sa_fov", "sa_drawfov",
+	"sa_fovsize", "sa_wallcheck", "sa_autowall", "sa_minpen",
+	"sa_multipoint", "sa_mpscale", "sa_predict", "sa_onlyaim",
+	"sa_part", "sa_prio", "sa_maxdist", "sa_zombies", "sa_bots",
+	"aim_enabled", "aim_always", "aim_keymode", "aim_curve",
+	"aim_smooth", "aim_fov", "aim_deadzone", "aim_wallcheck",
+	"aim_smokecheck", "aim_flashcheck", "aim_part", "aim_rcs",
+	"aim_rcs_x", "aim_rcs_y",
+	"tb_enabled", "tb_delay", "tb_maxdelay", "tb_hitchance", "tb_headonly",
+	"no_spread", "no_recoil", "rapid_fire", "rapid_mult", "auto_pistol",
+	"bhop", "bhop_always", "bhop_airduck", "bhop_recover",
+	"bhop_launch_wait", "bhop_min_stam", "edge_jump", "slow_walk",
+	"slow_walk_pct", "speed_hud", "strafe_mode", "strafe_gain",
+	"aa_enabled", "aa_yawbase", "aa_yawmode", "aa_spin", "aa_jitter",
+	"aa_offset", "aa_pitch", "aa_duckmode", "aa_shotflip", "aa_tp_visual",
+	"fakelag", "fakelag_ticks", "fakelag_adaptive",
+	"esp_enabled", "esp_teamcheck", "esp_zombies", "esp_dormant",
+	"esp_box", "esp_healthbar", "esp_name", "esp_health", "esp_armor",
+	"esp_weapon", "esp_dist", "esp_tracer", "esp_looking", "esp_chams",
+	"esp_color", "esp_zcolor", "esp_dcolor", "esp_drops", "esp_c4",
+	"esp_sound", "esp_sound_time", "speclist",
+	"fov_enabled", "fov_val", "third_person", "tp_dist",
+	"no_flash", "no_smoke", "no_shake",
+	"fps_boost", "fps_spoof", "fps_val", "fps_jitter",
+	"ping_spoof", "ping_val", "ping_jitter",
+	"knifebot", "knife_sa", "knife_heavy", "knife_zombies",
+	"hitmarker", "hitsound", "hitsound_type", "hitsound_vol",
+	"bullet_tracers", "tracer_color", "tracer_life", "esp_nades",
+	"no_bob", "potato_mode", "night_mode", "fullbright",
+	"wb_highlight", "wb_probe", "wb_tracers", "wb_tracer_enemy",
+	"wb_threat", "hitlogs", "killsay", "killsay_mode", "nade_helper",
+	"gun_changer", "gun_sel", "gun_skin", "gun_float",
+	"gun_stattrak", "gun_stat_val", "gun_skins",
+	"knife_changer", "knife_model", "knife_skin", "knife_float",
+	"knife_stattrak", "knife_stat_val",
+	"glove_changer", "glove_model", "glove_skin", "glove_float",
+	"auto_candy", "auto_revive",
+}
+
+local KNOWN_G_SET = {}
+for _, k in ipairs(KNOWN_G_KEYS) do KNOWN_G_SET[k] = true end
+
+local COLOR_G_KEYS = {
+	esp_color = true,
+	esp_zcolor = true,
+	esp_dcolor = true,
+	tracer_color = true,
+}
+
+local DROPDOWN_PREFIX_MAP = {
+	["stop mode"] = "rage_stopmode",
+	["pred mode"] = "pred_mode",
+	["hitbox"] = "rage_part",
+	["priority"] = "rage_prio",
+	["fire rate"] = "rage_ratemode",
+	["killfeed scope"] = "killfeed_scope",
+	["primary"] = "buy_primary",
+	["secondary"] = "buy_secondary",
+	["armor"] = "buy_armor",
+	["nade"] = "buy_nade",
+	["target part"] = "sa_part",
+	["sa priority"] = "sa_prio",
+	["aim key"] = "aim_keymode",
+	["aim curve"] = "aim_curve",
+	["strafe"] = "strafe_mode",
+	["yaw base"] = "aa_yawbase",
+	["yaw mode"] = "aa_yawmode",
+	["pitch"] = "aa_pitch",
+	["duck aa"] = "aa_duckmode",
+	["killsay style"] = "killsay_mode",
+	["hitsound"] = "hitsound_type",
+	["gun"] = "gun_sel",
+	["knife"] = "knife_model",
+	["gloves"] = "glove_model",
+}
+
+local LABEL_FLAG_MAP = {
+	["enable ragebot"] = "rage_enabled",
+	["auto shoot"] = "rage_autoshoot",
+	["doubletap burst (hvh)"] = "rage_doubletap",
+	["auto reload"] = "rage_autoreload",
+	["reload at rounds <="] = "rage_reload_at",
+	["auto stop"] = "rage_autostop",
+	["auto crouch on shot"] = "rage_autocrouch",
+	["auto scope (snipers)"] = "rage_autoscope",
+	["allow air shoot"] = "rage_airshoot",
+	["min damage (0 = off)"] = "rage_mindmg",
+	["min dmg override"] = "rage_ovr_active",
+	["override damage"] = "rage_ovr_dmg",
+	["force baim hp <="] = "rage_baim_hp",
+	["force baim in air"] = "rage_baim_air",
+	["anti-aim resolver"] = "rage_resolver",
+	["auto-peek (return on shot)"] = "autopeek",
+	["rage fov (deg, 360 = all)"] = "rage_fov",
+	["rage hitchance %"] = "rage_hitchance",
+	["multipoint hitscan"] = "rage_multipoint",
+	["velocity prediction"] = "rage_predict",
+	["manual lead (ms)"] = "pred_lead_ms",
+	["custom fire delay (ms)"] = "rage_delayms",
+	["rapid fire (all modes)"] = "rapid_fire",
+	["rapid fire mult"] = "rapid_mult",
+	["auto pistol (full-auto)"] = "auto_pistol",
+	["min gun pen (0=all, x100)"] = "rage_minpen",
+	["max wallbang walls"] = "rage_maxwalls",
+	["no spread"] = "no_spread",
+	["no recoil"] = "no_recoil",
+	["enable knife bot"] = "knifebot",
+	["knife silent aim"] = "knife_sa",
+	["smart backstab / heavy"] = "knife_heavy",
+	["enable auto buy"] = "buybot",
+	["buy defuse kit (ct)"] = "buy_kit",
+	["enable silent aim"] = "sa_enabled",
+	["hit chance %"] = "sa_hitchance",
+	["headshot chance %"] = "sa_hschance",
+	["use fov"] = "sa_fov",
+	["draw fov circle"] = "sa_drawfov",
+	["fov radius"] = "sa_fovsize",
+	["visible check"] = "sa_wallcheck",
+	["sa min pen (0=all, x100)"] = "sa_minpen",
+	["multipoint"] = "sa_multipoint",
+	["only while scoped/aiming"] = "sa_onlyaim",
+	["camera aimbot"] = "aim_enabled",
+	["always on (no key)"] = "aim_always",
+	["smoothness %"] = "aim_smooth",
+	["aimbot fov"] = "aim_fov",
+	["deadzone (px)"] = "aim_deadzone",
+	["rcs (recoil control)"] = "aim_rcs",
+	["rcs horizontal x %"] = "aim_rcs_x",
+	["rcs vertical y %"] = "aim_rcs_y",
+	["visible only"] = "aim_wallcheck",
+	["smoke check"] = "aim_smokecheck",
+	["flash check"] = "aim_flashcheck",
+	["triggerbot"] = "tb_enabled",
+	["trigger head only"] = "tb_headonly",
+	["trigger min delay (ms)"] = "tb_delay",
+	["trigger max delay (ms)"] = "tb_maxdelay",
+	["trigger hitchance %"] = "tb_hitchance",
+	["enable auto bhop"] = "bhop",
+	["always jump (no hold)"] = "bhop_always",
+	["standstill launch accel wait"] = "bhop_launch_wait",
+	["ground speed recover"] = "bhop_recover",
+	["min bhop stamina %"] = "bhop_min_stam",
+	["edge jump (ledges)"] = "edge_jump",
+	["crouch in air"] = "bhop_airduck",
+	["slow walk (silent peek)"] = "slow_walk",
+	["slow walk speed %"] = "slow_walk_pct",
+	["speed & stamina hud"] = "speed_hud",
+	["strafe gain %"] = "strafe_gain",
+	["enable anti-aim"] = "aa_enabled",
+	["spin speed"] = "aa_spin",
+	["jitter range"] = "aa_jitter",
+	["manual / base offset"] = "aa_offset",
+	["on-shot desync flip"] = "aa_shotflip",
+	["enable fake lag (choke)"] = "fakelag",
+	["fake lag ticks"] = "fakelag_ticks",
+	["adaptive lag"] = "fakelag_adaptive",
+	["enable esp"] = "esp_enabled",
+	["team check"] = "esp_teamcheck",
+	["zombie esp"] = "esp_zombies",
+	["last-seen (pvs culled)"] = "esp_dormant",
+	["sound/shot esp (wall bypass)"] = "esp_sound",
+	["box"] = "esp_box",
+	["health bar"] = "esp_healthbar",
+	["chams (highlight)"] = "esp_chams",
+	["name"] = "esp_name",
+	["health text"] = "esp_health",
+	["armor + helmet"] = "esp_armor",
+	["weapon + ammo"] = "esp_weapon",
+	["distance"] = "esp_dist",
+	["tracers"] = "esp_tracer",
+	["looking at you"] = "esp_looking",
+	["player esp color"] = "esp_color",
+	["zombie esp color"] = "esp_zcolor",
+	["last-seen color"] = "esp_dcolor",
+	["spectator list"] = "speclist",
+	["dropped weapon esp"] = "esp_drops",
+	["planted c4 timer + defuse esp"] = "esp_c4",
+	["grenade threat + fuse esp"] = "esp_nades",
+	["grenade trajectory + bounce"] = "nade_helper",
+	["fov changer"] = "fov_enabled",
+	["field of view"] = "fov_val",
+	["third person"] = "third_person",
+	["third person distance"] = "tp_dist",
+	["anti-flash"] = "no_flash",
+	["no smoke"] = "no_smoke",
+	["no explosion shake"] = "no_shake",
+	["fps boost"] = "fps_boost",
+	["fps spoof"] = "fps_spoof",
+	["fake fps"] = "fps_val",
+	["fps jitter"] = "fps_jitter",
+	["ping spoof"] = "ping_spoof",
+	["fake ping (ms)"] = "ping_val",
+	["ping jitter"] = "ping_jitter",
+	["server hitmarker (pvp/bots)"] = "hitmarker",
+	["hvh hit & kill logs"] = "hitlogs",
+	["wallbang zone highlight"] = "wb_highlight",
+	["crosshair wallbang probe"] = "wb_probe",
+	["wallbang tracer esp"] = "wb_tracers",
+	["show enemy bullet tracers"] = "wb_tracer_enemy",
+	["incoming wallbang threat alert"] = "wb_threat",
+	["killsay chat"] = "killsay",
+	["hitsound"] = "hitsound",
+	["hitsound volume %"] = "hitsound_vol",
+	["local 3d bullet tracers"] = "bullet_tracers",
+	["tracer color"] = "tracer_color",
+	["tracer duration (0.1s)"] = "tracer_life",
+	["no viewmodel bob/sway"] = "no_bob",
+	["potato map & foliage"] = "potato_mode",
+	["night mode"] = "night_mode",
+	["fullbright"] = "fullbright",
+	["auto collect candy (38m)"] = "auto_candy",
+	["auto revive downed allies"] = "auto_revive",
+	["enable weapon skins"] = "gun_changer",
+	["gun float (x0.001)"] = "gun_float",
+	["stattrak guns"] = "gun_stattrak",
+	["gun stattrak kills"] = "gun_stat_val",
+	["enable knife changer"] = "knife_changer",
+	["knife float (x0.001)"] = "knife_float",
+	["stattrak knife"] = "knife_stattrak",
+	["knife stattrak kills"] = "knife_stat_val",
+	["enable glove changer"] = "glove_changer",
+	["glove float (x0.001)"] = "glove_float",
+}
+
+local default_g_values = {}
 local genv_watchers = {}
 local genv_watch_started = false
+
+local function deep_copy_table(t)
+	if type(t) ~= "table" then return t end
+	local out = {}
+	for k, v in pairs(t) do
+		out[k] = type(v) == "table" and deep_copy_table(v) or v
+	end
+	return out
+end
 
 local function read_flag_val(flag)
 	if not flag then return nil end
@@ -84,8 +343,67 @@ local function read_flag_val(flag)
 	return nil
 end
 
+local function capture_default_flag(flag)
+	if not flag or default_g_values[flag] ~= nil then return end
+	local v = read_flag_val(flag)
+	if v ~= nil then
+		default_g_values[flag] = type(v) == "table" and deep_copy_table(v) or v
+	end
+end
+
+for _, k in ipairs(KNOWN_G_KEYS) do
+	capture_default_flag(k)
+end
+
+local function infer_flag_from_cb(cb)
+	if type(cb) ~= "function" then return nil end
+	local gc = (debug and debug.getconstants) or getconstants
+	if not gc then return nil end
+	local ok, consts = pcall(gc, cb)
+	if not ok or type(consts) ~= "table" then return nil end
+	for _, c in pairs(consts) do
+		if type(c) == "string" and (KNOWN_G_SET[c] or genv[c] ~= nil) then
+			return c
+		end
+	end
+	return nil
+end
+
+local function resolve_sync_flag(explicit_flag, label_name, cb)
+	if explicit_flag and explicit_flag ~= "" then
+		if KNOWN_G_SET[explicit_flag] or read_flag_val(explicit_flag) ~= nil then
+			capture_default_flag(explicit_flag)
+			return explicit_flag
+		end
+	end
+	local from_cb = infer_flag_from_cb(cb)
+	if from_cb then
+		capture_default_flag(from_cb)
+		return from_cb
+	end
+	if label_name and type(label_name) == "string" then
+		local low = label_name:lower()
+		if LABEL_FLAG_MAP[low] then
+			capture_default_flag(LABEL_FLAG_MAP[low])
+			return LABEL_FLAG_MAP[low]
+		end
+		local prefix = low:match("^([^:]+):")
+		if prefix then
+			prefix = prefix:gsub("^%s+", ""):gsub("%s+$", "")
+			if DROPDOWN_PREFIX_MAP[prefix] then
+				capture_default_flag(DROPDOWN_PREFIX_MAP[prefix])
+				return DROPDOWN_PREFIX_MAP[prefix]
+			end
+		end
+	end
+	local fallback = explicit_flag or label_name
+	capture_default_flag(fallback)
+	return fallback
+end
+
 local function write_flag_val(flag, val)
 	if not flag then return end
+	capture_default_flag(flag)
 	genv[flag] = val
 	_G[flag] = val
 	local w = genv_watchers[flag]
@@ -103,6 +421,7 @@ local function start_genv_watch()
 				local v = read_flag_val(flag)
 				if v ~= nil and v ~= w.last and not (w.busy and w.busy()) then
 					w.last = v
+					restore_id()
 					for _, cb in ipairs(w.callbacks) do
 						pcall(cb, v)
 					end
@@ -110,7 +429,7 @@ local function start_genv_watch()
 				end
 			end
 			if not any then break end
-			task.wait(0.05)
+			task.wait(0.04)
 		end
 		genv_watch_started = false
 	end)
@@ -118,6 +437,7 @@ end
 
 local function watch_genv(flag, apply, busy)
 	if not flag then return end
+	capture_default_flag(flag)
 	local existing = genv_watchers[flag]
 	if existing then
 		table.insert(existing.callbacks, apply)
@@ -135,9 +455,20 @@ local function watch_genv(flag, apply, busy)
 	start_genv_watch()
 end
 
-local is_mobile = uis.TouchEnabled and not uis.MouseEnabled
+local is_mobile = uis.TouchEnabled and (not uis.MouseEnabled or cam.ViewportSize.Y <= 680)
 local vp_size = cam.ViewportSize
 local scale_factor = math.clamp(vp_size.Y / 1080, 0.75, 1.35)
+
+local function set_scroll_lock(inst, locked)
+	if not inst then return end
+	local cur = inst.Parent
+	while cur do
+		if cur:IsA("ScrollingFrame") then
+			cur.ScrollingEnabled = not locked
+		end
+		cur = cur.Parent
+	end
+end
 
 local BINDABLE_MOUSE_TYPES = {
 	[Enum.UserInputType.MouseButton1] = "MB1",
@@ -385,19 +716,39 @@ textBoxHandler.__index = function(_, i) return rawget(textBoxHandler, i) or rawg
 colorWheelHandler.__index = function(_, i) return rawget(colorWheelHandler, i) or rawget(elementHandler, i) end
 
 genv.BSMTConfigData = genv.BSMTConfigData or {}
-genv.BSMTConfigElements = genv.BSMTConfigElements or {}
+genv.BSMTConfigElements = {}
 _G.BSMTConfigData = genv.BSMTConfigData
 _G.BSMTConfigElements = genv.BSMTConfigElements
+
+local bucket_mt = {
+	__index = function(t, k)
+		local first = rawget(t, 1)
+		if first and type(first[k]) == "function" then
+			return function(_, ...)
+				for _, el in ipairs(t) do
+					if el and type(el[k]) == "function" then
+						pcall(el[k], el, ...)
+					end
+				end
+			end
+		end
+		return first and first[k]
+	end,
+}
 
 local function register_config_element(key, elem)
 	if not key then return end
 	local bucket = _G.BSMTConfigElements[key]
 	if not bucket then
-		_G.BSMTConfigElements[key] = { elem }
+		_G.BSMTConfigElements[key] = elem
 	elseif bucket.Type then
-		_G.BSMTConfigElements[key] = { bucket, elem }
-	else
-		table.insert(bucket, elem)
+		if bucket ~= elem then
+			_G.BSMTConfigElements[key] = setmetatable({ bucket, elem }, bucket_mt)
+		end
+	elseif type(bucket) == "table" then
+		if not table.find(bucket, elem) then
+			table.insert(bucket, elem)
+		end
 	end
 end
 
@@ -411,7 +762,11 @@ local function unregister_config_element(key, elem)
 		for i = #bucket, 1, -1 do
 			if bucket[i] == elem then table.remove(bucket, i) end
 		end
-		if #bucket == 0 then _G.BSMTConfigElements[key] = nil end
+		if #bucket == 1 then
+			_G.BSMTConfigElements[key] = bucket[1]
+		elseif #bucket == 0 then
+			_G.BSMTConfigElements[key] = nil
+		end
 	end
 end
 
@@ -647,6 +1002,63 @@ local function create_original_elements()
 		pageLogo.Image = "rbxassetid://11435586663"
 		pageLogo.ImageTransparency = 1
 		pageLogo.Parent = holder
+
+		local grip_sz = is_mobile and 26 or 18
+		local resizeGrip = Instance.new("TextButton")
+		resizeGrip.Name = "ResizeGrip"
+		resizeGrip.Parent = background
+		resizeGrip.AnchorPoint = Vector2.new(1, 1)
+		resizeGrip.Position = UDim2.new(1, 0, 1, 0)
+		resizeGrip.Size = UDim2.fromOffset(grip_sz, grip_sz)
+		resizeGrip.BackgroundTransparency = 1
+		resizeGrip.BorderSizePixel = 0
+		resizeGrip.AutoButtonColor = false
+		resizeGrip.Text = ""
+		resizeGrip.ZIndex = 25
+
+		for i = 1, 3 do
+			local dot = Instance.new("Frame")
+			dot.Name = "GripBar" .. i
+			dot.Parent = resizeGrip
+			dot.AnchorPoint = Vector2.new(1, 1)
+			dot.BackgroundColor3 = Theme.TextDim
+			dot.BackgroundTransparency = 0.25
+			dot.BorderSizePixel = 0
+			dot.Rotation = -45
+			local len = 4 + i * 3
+			local off = 2 + (3 - i) * 3
+			dot.Size = UDim2.fromOffset(len, 1)
+			dot.Position = UDim2.new(1, -off, 1, -off)
+			dot.ZIndex = 26
+			local dc = Instance.new("UICorner")
+			dc.CornerRadius = UDim.new(1, 0)
+			dc.Parent = dot
+		end
+
+		local edge_t = is_mobile and 10 or 6
+		local resizeRight = Instance.new("TextButton")
+		resizeRight.Name = "ResizeRight"
+		resizeRight.Parent = background
+		resizeRight.AnchorPoint = Vector2.new(1, 0)
+		resizeRight.Position = UDim2.new(1, 0, 0, 38)
+		resizeRight.Size = UDim2.new(0, edge_t, 1, -(38 + grip_sz))
+		resizeRight.BackgroundTransparency = 1
+		resizeRight.BorderSizePixel = 0
+		resizeRight.AutoButtonColor = false
+		resizeRight.Text = ""
+		resizeRight.ZIndex = 24
+
+		local resizeBottom = Instance.new("TextButton")
+		resizeBottom.Name = "ResizeBottom"
+		resizeBottom.Parent = background
+		resizeBottom.AnchorPoint = Vector2.new(0, 1)
+		resizeBottom.Position = UDim2.new(0, 0, 1, 0)
+		resizeBottom.Size = UDim2.new(1, -grip_sz, 0, edge_t)
+		resizeBottom.BackgroundTransparency = 1
+		resizeBottom.BorderSizePixel = 0
+		resizeBottom.AutoButtonColor = false
+		resizeBottom.Text = ""
+		resizeBottom.ZIndex = 24
 
 		return screenGui
 	end
@@ -2071,7 +2483,8 @@ function elementHandler:Remove()
 	self.GuiToRemove:Destroy()
 end
 
-function Library.new(windowName, constrainToScreen, width, height, visibilityKeybind)
+function Library.new(windowName, constrainToScreen, width, height, visibilityKeybind, brandImage)
+	restore_id()
 	library_alive = true
 	local window = setmetatable({}, windowHandler)
 	local windowInstance = original_elements.Window:Clone()
@@ -2079,6 +2492,9 @@ function Library.new(windowName, constrainToScreen, width, height, visibilityKey
 	local heading = background.Heading
 	local buttonHolder = heading.ButtonHolder
 	local holder = background.Holder
+	local resizeGrip = background:FindFirstChild("ResizeGrip")
+	local resizeRight = background:FindFirstChild("ResizeRight")
+	local resizeBottom = background:FindFirstChild("ResizeBottom")
 
 	window.IsHidden = false
 	window.TabInfo = {}
@@ -2099,13 +2515,21 @@ function Library.new(windowName, constrainToScreen, width, height, visibilityKey
 
 	window.CurrentKeybind = get_keycode_from_name(visibilityKeybind) or Enum.KeyCode.RightShift
 	heading.Title.Text = windowName or "BSMT"
+	if brandImage and heading:FindFirstChild("BrandIcon") then
+		heading.BrandIcon.Image = brandImage
+	end
+	if Library.Watermark and Library.Watermark.SetTitle and windowName then
+		pcall(Library.Watermark.SetTitle, windowName)
+	end
 	parent_protected(windowInstance)
 
 	local cur_vp = cam.ViewportSize
-	local w_px = width or (is_mobile and math.clamp(math.round(cur_vp.X * 0.86), 440, 680) or 660)
-	local h_px = height or (is_mobile and math.clamp(math.round(cur_vp.Y * 0.80), 300, 460) or 440)
-	w_px = math.min(w_px, cur_vp.X - 16)
-	h_px = math.min(h_px, cur_vp.Y - 16)
+	local min_w = is_mobile and 370 or 460
+	local min_h = is_mobile and 240 or 290
+	local default_w = width or (is_mobile and math.clamp(math.round(cur_vp.X * 0.86), 420, 680) or 660)
+	local default_h = height or (is_mobile and math.clamp(math.round(cur_vp.Y * 0.80), 280, 460) or 440)
+	local w_px = math.clamp(default_w, min_w, math.max(min_w, cur_vp.X - 16))
+	local h_px = math.clamp(default_h, min_h, math.max(min_h, cur_vp.Y - 16))
 
 	background.Size = UDim2.fromOffset(w_px, h_px)
 	background.Position = UDim2.fromOffset(math.round(cur_vp.X / 2), math.round(cur_vp.Y / 2))
@@ -2114,12 +2538,108 @@ function Library.new(windowName, constrainToScreen, width, height, visibilityKey
 	local min_long_size = Vector2.new(w_px, 38)
 	local min_short_size = Vector2.new(math.max(180, math.round(w_px * 0.35)), 38)
 
+	local function notify_window_resized()
+		for fn in pairs(window_resize_listeners) do
+			pcall(fn)
+		end
+	end
+
+	local function set_grip_highlight(active)
+		if not resizeGrip then return end
+		local col = active and Theme.Accent or Theme.TextDim
+		local tr = active and 0 or 0.25
+		for _, ch in ipairs(resizeGrip:GetChildren()) do
+			if ch:IsA("Frame") then
+				ch.BackgroundColor3 = col
+				ch.BackgroundTransparency = tr
+			end
+		end
+	end
+
+	local function set_resize_handles_visible(vis)
+		if resizeGrip then resizeGrip.Visible = vis end
+		if resizeRight then resizeRight.Visible = vis end
+		if resizeBottom then resizeBottom.Visible = vis end
+	end
+
+	function window:SetSize(nw, nh, animate)
+		local vp = cam.ViewportSize
+		local cw = math.clamp(math.round(tonumber(nw) or original_window_size.X), min_w, math.max(min_w, vp.X - 12))
+		local ch = math.clamp(math.round(tonumber(nh) or original_window_size.Y), min_h, math.max(min_h, vp.Y - 12))
+		original_window_size = Vector2.new(cw, ch)
+		min_long_size = Vector2.new(cw, 38)
+		min_short_size = Vector2.new(math.max(180, math.round(cw * 0.35)), 38)
+		if not self.IsMinimized then
+			if animate then
+				tweenservice:Create(background, TweenInfo.new(0.18, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+					Size = UDim2.fromOffset(cw, ch)
+				}):Play()
+			else
+				background.Size = UDim2.fromOffset(cw, ch)
+			end
+			local nx = math.clamp(background.Position.X.Offset, cw / 2, vp.X - cw / 2)
+			local ny = math.clamp(background.Position.Y.Offset, ch / 2, vp.Y - ch / 2)
+			background.Position = UDim2.fromOffset(nx, ny)
+		end
+		notify_window_resized()
+	end
+
+	function window:GetSize()
+		return original_window_size
+	end
+
+	function window:ResetSize()
+		self:SetSize(default_w, default_h, true)
+	end
+
 	local dragging = false
 	local drag_input = nil
 	local drag_start_pos = nil
 	local win_start_pos = nil
 
+	local resizing = false
+	local resize_input = nil
+	local resize_axis = "xy"
+	local resize_start_mouse = nil
+	local resize_start_size = nil
+	local resize_start_pos = nil
+
+	local function bind_resize_handle(btn, axis)
+		if not btn then return end
+		if axis == "xy" then
+			btn.MouseEnter:Connect(function()
+				if not resizing then set_grip_highlight(true) end
+			end)
+			btn.MouseLeave:Connect(function()
+				if not resizing then set_grip_highlight(false) end
+			end)
+		end
+		btn.InputBegan:Connect(function(input)
+			if window.IsMinimized then return end
+			if is_primary_input(input) then
+				resizing = true
+				dragging = false
+				resize_axis = axis
+				resize_input = input
+				resize_start_mouse = Vector2.new(input.Position.X, input.Position.Y)
+				resize_start_size = Vector2.new(background.Size.X.Offset, background.Size.Y.Offset)
+				resize_start_pos = Vector2.new(background.Position.X.Offset, background.Position.Y.Offset)
+				set_grip_highlight(true)
+			end
+		end)
+		btn.InputChanged:Connect(function(input)
+			if is_move_input(input) then
+				resize_input = input
+			end
+		end)
+	end
+
+	bind_resize_handle(resizeGrip, "xy")
+	bind_resize_handle(resizeRight, "x")
+	bind_resize_handle(resizeBottom, "y")
+
 	heading.InputBegan:Connect(function(input)
+		if resizing then return end
 		if is_primary_input(input) then
 			dragging = true
 			drag_input = input
@@ -2135,7 +2655,34 @@ function Library.new(windowName, constrainToScreen, width, height, visibilityKey
 	end)
 
 	track_conn(uis.InputChanged:Connect(function(input)
-		if dragging and (input == drag_input or input.UserInputType == Enum.UserInputType.Touch) then
+		if resizing and (input == resize_input or is_move_input(input)) then
+			local delta = Vector2.new(input.Position.X, input.Position.Y) - resize_start_mouse
+			local vp = cam.ViewportSize
+			local max_w = math.max(min_w, vp.X - 12)
+			local max_h = math.max(min_h, vp.Y - 12)
+			local nw = resize_start_size.X
+			local nh = resize_start_size.Y
+			if resize_axis == "xy" or resize_axis == "x" then
+				nw = math.clamp(math.round(resize_start_size.X + delta.X), min_w, max_w)
+			end
+			if resize_axis == "xy" or resize_axis == "y" then
+				nh = math.clamp(math.round(resize_start_size.Y + delta.Y), min_h, max_h)
+			end
+			local dw = nw - resize_start_size.X
+			local dh = nh - resize_start_size.Y
+			local nx = resize_start_pos.X + dw * 0.5
+			local ny = resize_start_pos.Y + dh * 0.5
+			if window.isConstraintedToScreenBoundaries then
+				nx = math.clamp(nx, nw / 2, vp.X - nw / 2)
+				ny = math.clamp(ny, nh / 2, vp.Y - nh / 2)
+			end
+			background.Size = UDim2.fromOffset(nw, nh)
+			background.Position = UDim2.fromOffset(math.round(nx), math.round(ny))
+			original_window_size = Vector2.new(nw, nh)
+			min_long_size = Vector2.new(nw, 38)
+			min_short_size = Vector2.new(math.max(180, math.round(nw * 0.35)), 38)
+			notify_window_resized()
+		elseif dragging and (input == drag_input or input.UserInputType == Enum.UserInputType.Touch) then
 			local delta = Vector2.new(input.Position.X, input.Position.Y) - drag_start_pos
 			local vp = cam.ViewportSize
 			local abs_sz = background.AbsoluteSize
@@ -2151,6 +2698,12 @@ function Library.new(windowName, constrainToScreen, width, height, visibilityKey
 
 	track_conn(uis.InputEnded:Connect(function(input)
 		if is_primary_input(input) then
+			if resizing then
+				resizing = false
+				resize_input = nil
+				set_grip_highlight(false)
+				notify_window_resized()
+			end
 			dragging = false
 			drag_input = nil
 		end
@@ -2159,8 +2712,14 @@ function Library.new(windowName, constrainToScreen, width, height, visibilityKey
 	track_conn(cam:GetPropertyChangedSignal("ViewportSize"):Connect(function()
 		local vp = cam.ViewportSize
 		local abs_sz = background.AbsoluteSize
-		local nx = math.clamp(background.Position.X.Offset, abs_sz.X / 2, vp.X - abs_sz.X / 2)
-		local ny = math.clamp(background.Position.Y.Offset, abs_sz.Y / 2, vp.Y - abs_sz.Y / 2)
+		local nw = math.min(abs_sz.X, math.max(min_w, vp.X - 12))
+		local nh = math.min(abs_sz.Y, math.max(min_h, vp.Y - 12))
+		if not window.IsMinimized and (nw ~= abs_sz.X or nh ~= abs_sz.Y) then
+			background.Size = UDim2.fromOffset(nw, nh)
+			original_window_size = Vector2.new(nw, nh)
+		end
+		local nx = math.clamp(background.Position.X.Offset, nw / 2, vp.X - nw / 2)
+		local ny = math.clamp(background.Position.Y.Offset, nh / 2, vp.Y - nh / 2)
 		background.Position = UDim2.fromOffset(nx, ny)
 	end))
 
@@ -2180,6 +2739,7 @@ function Library.new(windowName, constrainToScreen, width, height, visibilityKey
 	local function minimize_window()
 		window.IsMinimized = true
 		holder.Visible = false
+		set_resize_handles_visible(false)
 		local tw_up = tweenservice:Create(background, TweenInfo.new(0.18, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
 			Size = UDim2.fromOffset(min_long_size.X, min_long_size.Y)
 		})
@@ -2217,6 +2777,7 @@ function Library.new(windowName, constrainToScreen, width, height, visibilityKey
 		tw_right.Completed:Connect(function(state)
 			if state == Enum.PlaybackState.Completed then
 				holder.Visible = true
+				set_resize_handles_visible(true)
 				local tw_down = tweenservice:Create(background, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
 					Size = UDim2.fromOffset(original_window_size.X, original_window_size.Y)
 				})
@@ -2236,6 +2797,11 @@ function Library.new(windowName, constrainToScreen, width, height, visibilityKey
 	buttonHolder.Minus.Activated:Connect(minimize_window)
 
 	window._visibilityConn = track_conn(uis.InputBegan:Connect(function(input, gp)
+		if input.UserInputType == Enum.UserInputType.Touch and not window.MobileButton then
+			is_mobile = true
+			Library.Settings.MobileMode = true
+			window:CreateMobileButton(nil, true)
+		end
 		if gp then return end
 		if not background or not background.Parent then
 			if window and window._visibilityConn then
@@ -2251,10 +2817,11 @@ function Library.new(windowName, constrainToScreen, width, height, visibilityKey
 
 	auto_canvas_size(holder.Tabs, holder.Tabs.TabsUIListLayout, 20)
 
-	if is_mobile then
+	if is_mobile or uis.TouchEnabled then
 		window:CreateMobileButton(nil, true)
 	end
 
+	Library._activeWindow = window
 	return window
 end
 
@@ -2461,6 +3028,10 @@ function tabHandler:Section(sectionTitle, side)
 	end
 
 	sectionInstance.ElementHolder.ElementHolderList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(queue_section_resize)
+	window_resize_listeners[queue_section_resize] = true
+	sectionInstance.AncestryChanged:Connect(function(_, parent)
+		if not parent then window_resize_listeners[queue_section_resize] = nil end
+	end)
 	sectionInstance.Heading.Title.Text = sectionTitle or "Section"
 	sectionInstance.Parent = get_target_column()
 	queue_section_resize()
@@ -2469,6 +3040,7 @@ function tabHandler:Section(sectionTitle, side)
 end
 
 function elementHandler:Title(titleName)
+	restore_id()
 	local title = setmetatable({}, titleHandler)
 	local titleInstance = original_elements.Title:Clone()
 
@@ -2497,6 +3069,7 @@ function elementHandler:Title(titleName)
 end
 
 function titleHandler:ChangeText(newText)
+	restore_id()
 	local textParams = Instance.new("GetTextBoundsParams")
 	textParams.Text = newText or "N/A"
 	textParams.Font = self.Instance.TitleText.FontFace
@@ -2509,6 +3082,7 @@ function titleHandler:ChangeText(newText)
 end
 
 function elementHandler:Label(labelInputtedText, textSize, textColor)
+	restore_id()
 	local label = setmetatable({}, labelHandler)
 	local labelInstance = original_elements.Label:Clone()
 
@@ -2531,19 +3105,30 @@ function elementHandler:Label(labelInputtedText, textSize, textColor)
 	labelInstance.LabelBackground.LabelText.TextColor3 = textColor or Theme.TextMuted
 	labelInstance.LabelBackground.LabelText.TextSize = textSize or M.TextSizeSm
 
-	labelInstance.Parent = self.ElementToParentChildren
-	task.defer(function()
+	local function recalc_label_height()
 		if not labelInstance.Parent then return end
+		restore_id()
 		local lbl = labelInstance.LabelBackground.LabelText
+		textParams.Text = lbl.Text
 		textParams.Width = math.max(50, lbl.AbsoluteSize.X - 16)
-		local bounds = textservice:GetTextBoundsAsync(textParams)
-		labelInstance.Size = UDim2.new(1, 0, 0, math.max(M.ElementH, bounds.Y + 10))
+		local ok, bounds = pcall(function() return textservice:GetTextBoundsAsync(textParams) end)
+		if ok and bounds then
+			labelInstance.Size = UDim2.new(1, 0, 0, math.max(M.ElementH, bounds.Y + 10))
+		end
+	end
+
+	labelInstance.Parent = self.ElementToParentChildren
+	window_resize_listeners[recalc_label_height] = true
+	labelInstance.AncestryChanged:Connect(function(_, parent)
+		if not parent then window_resize_listeners[recalc_label_height] = nil end
 	end)
+	task.defer(recalc_label_height)
 
 	return label
 end
 
 function labelHandler:ChangeText(newText, playAnimation)
+	restore_id()
 	local lbl = self.Instance.LabelBackground.LabelText
 	local textParams = Instance.new("GetTextBoundsParams")
 	textParams.Text = newText or "N/A"
@@ -2556,8 +3141,10 @@ function labelHandler:ChangeText(newText, playAnimation)
 		self.PlayingAnimations[i] = nil
 	end
 
-	local bounds = textservice:GetTextBoundsAsync(textParams)
-	self.Instance.Size = UDim2.new(1, 0, 0, math.max(M.ElementH, bounds.Y + 10))
+	local ok, bounds = pcall(function() return textservice:GetTextBoundsAsync(textParams) end)
+	if ok and bounds then
+		self.Instance.Size = UDim2.new(1, 0, 0, math.max(M.ElementH, bounds.Y + 10))
+	end
 
 	if playAnimation then
 		local co = coroutine.create(function()
@@ -2574,6 +3161,7 @@ function labelHandler:ChangeText(newText, playAnimation)
 end
 
 function elementHandler:Button(buttonName, callback)
+	restore_id()
 	local button = setmetatable({}, buttonHandler)
 	local buttonInstance = original_elements.Button:Clone()
 	local bg = buttonInstance.ButtonBg
@@ -2591,6 +3179,7 @@ function elementHandler:Button(buttonName, callback)
 		if is_primary_input(inp) then pressUp:Play() end
 	end)
 	buttonInstance.Activated:Connect(function()
+		restore_id()
 		pressUp:Play()
 		callback()
 	end)
@@ -2611,16 +3200,28 @@ function elementHandler:Button(buttonName, callback)
 end
 
 function elementHandler:Dropdown(dropdownName, optionsOrCallback, callbackOrFlag, flagArg)
+	restore_id()
 	local dropdown = setmetatable({}, dropdownHandler)
 	local dropdownInstance = original_elements.Dropdown:Clone()
 	local elementHolderInner = dropdownInstance.ElementHolder.ElementHolderBackground.ElementHolderInnerBackground
 	local listLayout = elementHolderInner.ElementHolderInnerBackgroundList
 	local listPaddings = 12
-	local maxListHeight = 140
+	local maxListHeight = 148
 
 	local options = type(optionsOrCallback) == "table" and optionsOrCallback or nil
 	local callback = type(optionsOrCallback) == "function" and optionsOrCallback or (type(callbackOrFlag) == "function" and callbackOrFlag or nil)
 	local flag = type(callbackOrFlag) == "string" and callbackOrFlag or flagArg
+
+	local prefix_str, init_val = nil, nil
+	if type(dropdownName) == "string" then
+		local p, v = dropdownName:match("^([^:]+:%s*)(.+)$")
+		if p and v then
+			prefix_str = p
+			init_val = v
+		end
+	end
+
+	local syncKey = resolve_sync_flag(flag, dropdownName, callback)
 
 	local imgOpenTween = tweenservice:Create(dropdownInstance.DropdownButton.ButtonBackground.DropdownImage, TweenInfo.new(0.2, Enum.EasingStyle.Quad), { Rotation = 0 })
 	local imgCloseTween = tweenservice:Create(dropdownInstance.DropdownButton.ButtonBackground.DropdownImage, TweenInfo.new(0.2, Enum.EasingStyle.Quad), { Rotation = 180 })
@@ -2649,11 +3250,16 @@ function elementHandler:Dropdown(dropdownName, optionsOrCallback, callbackOrFlag
 		end
 	end
 
+	local function collapse_dropdown()
+		if not dropdown.IsExpanded then return end
+		dropdown.IsExpanded = false
+		imgCloseTween:Play()
+		closeTween:Play()
+	end
+
 	local function toggle_dropdown()
 		if dropdown.IsExpanded then
-			dropdown.IsExpanded = false
-			imgCloseTween:Play()
-			closeTween:Play()
+			collapse_dropdown()
 		else
 			dropdown.IsExpanded = true
 			imgOpenTween:Play()
@@ -2664,14 +3270,19 @@ function elementHandler:Dropdown(dropdownName, optionsOrCallback, callbackOrFlag
 	dropdown.Type = "Dropdown"
 	dropdown.IdentifierText = dropdownName or "N/A"
 	dropdown.BaseTitle = dropdownName or "Dropdown"
+	dropdown.Prefix = prefix_str
 	dropdown.Instance = dropdownInstance
 	dropdown.GuiToRemove = dropdownInstance
 	dropdown.ElementToParentChildren = elementHolderInner
 	dropdown.IsExpanded = false
-	dropdown.Selected = nil
+	dropdown.Selected = init_val
 	dropdown.Callback = callback
-	dropdown.Flag = flag or dropdownName
-	dropdown.ConfigIdentifier = flag or dropdownName or "Dropdown"
+	dropdown.Flag = syncKey
+	dropdown.ConfigIdentifier = syncKey or dropdownName or "Dropdown"
+	dropdown._optionCallbacks = {}
+	dropdown._optionButtons = {}
+	dropdown._collapse = collapse_dropdown
+	dropdown._applying = false
 
 	register_config_element(dropdown.ConfigIdentifier, dropdown)
 
@@ -2687,42 +3298,159 @@ function elementHandler:Dropdown(dropdownName, optionsOrCallback, callbackOrFlag
 	dropdownInstance.DropdownButton.ButtonBackground.DropdownText.Text = dropdownName or "N/A"
 	dropdownInstance.Parent = self.ElementToParentChildren
 
+	function dropdown:_bindFlag(newFlag)
+		if not newFlag or newFlag == "" or self._boundWatchedFlag == newFlag then return end
+		if self.ConfigIdentifier and self.ConfigIdentifier ~= newFlag then
+			unregister_config_element(self.ConfigIdentifier, self)
+		end
+		self.Flag = newFlag
+		self.ConfigIdentifier = newFlag
+		self._boundWatchedFlag = newFlag
+		register_config_element(newFlag, self)
+		local curG = read_flag_val(newFlag)
+		if curG ~= nil then
+			self.Selected = curG
+			_G.BSMTConfigData[newFlag] = curG
+			if self.Prefix then
+				self:ChangeText(self.Prefix .. tostring(curG))
+			end
+		end
+		watch_genv(newFlag, function(v)
+			if v ~= nil and tostring(v) ~= tostring(self.Selected) and not self._applying then
+				self:Set(v, false)
+			end
+		end)
+	end
+
+	if syncKey and (KNOWN_G_SET[syncKey] or flag ~= nil or read_flag_val(syncKey) ~= nil) then
+		dropdown:_bindFlag(syncKey)
+	end
+
 	if options then
 		dropdown:SetOptions(options)
 	end
 
 	local start_val = read_flag_val(dropdown.Flag)
 	if start_val == nil then start_val = _G.BSMTConfigData[dropdown.ConfigIdentifier] end
-	if start_val ~= nil and options then
+	if start_val ~= nil then
 		dropdown:Set(start_val, false)
 	end
 
-	watch_genv(dropdown.Flag, function(v)
-		if v ~= nil and tostring(v) ~= tostring(dropdown.Selected) then
-			dropdown:Set(v, true)
+	task.defer(function()
+		if not dropdownInstance.Parent then return end
+		local def_val = read_flag_val(dropdown.Flag)
+		if def_val ~= nil and tostring(def_val) ~= tostring(dropdown.Selected) then
+			dropdown:Set(def_val, false)
+		elseif dropdown.Selected ~= nil then
+			dropdown:_highlightOption(dropdown.Selected)
 		end
 	end)
 
 	return dropdown
 end
 
-function dropdownHandler:ChangeText(newText)
-	newText = newText or "N/A"
-	self.Instance.DropdownButton.ButtonBackground.DropdownText.Text = newText
-	self.IdentifierText = newText
-end
-
-function dropdownHandler:Set(val, fireCallback)
-	self.Selected = val
-	self:ChangeText(tostring(val))
-	_G.BSMTConfigData[self.ConfigIdentifier] = val
-	if self.Flag then write_flag_val(self.Flag, val) end
-	if fireCallback ~= false and self.Callback then
-		self.Callback(val)
+function dropdownHandler:_highlightOption(selectedVal)
+	if not self._optionButtons then return end
+	local selStr = tostring(selectedVal or "")
+	for optKey, btn in pairs(self._optionButtons) do
+		if btn and btn.Instance and btn.Instance.Parent then
+			local bg = btn.Instance:FindFirstChild("ButtonBg")
+			local txt = bg and bg:FindFirstChild("ButtonText")
+			local strk = bg and bg:FindFirstChildWhichIsA("UIStroke")
+			local isSel = (optKey == selStr)
+			if txt then txt.TextColor3 = isSel and Theme.AccentBright or Theme.Text end
+			if strk then strk.Color = isSel and Theme.Accent or Theme.Stroke end
+		end
 	end
 end
 
+function dropdownHandler:ChangeText(newText)
+	restore_id()
+	newText = newText or "N/A"
+	self.Instance.DropdownButton.ButtonBackground.DropdownText.Text = newText
+	self.IdentifierText = newText
+	if self.Prefix and newText:sub(1, #self.Prefix) == self.Prefix then
+		local extracted = newText:sub(#self.Prefix + 1)
+		if extracted ~= "" then
+			self.Selected = extracted
+			self:_highlightOption(extracted)
+		end
+	end
+end
+
+function dropdownHandler:Button(optName, callback)
+	restore_id()
+	local optStr = tostring(optName or "Option")
+	self._optionCallbacks = self._optionCallbacks or {}
+	self._optionButtons = self._optionButtons or {}
+
+	if not self._boundWatchedFlag and type(callback) == "function" then
+		local inferred = infer_flag_from_cb(callback)
+		if inferred then
+			self:_bindFlag(inferred)
+		end
+	end
+
+	self._optionCallbacks[optStr] = callback
+
+	local btn = elementHandler.Button(self, optStr, function()
+		restore_id()
+		self._applying = true
+		self.Selected = optName
+		if self.Prefix then
+			self:ChangeText(self.Prefix .. optStr)
+		end
+		if callback then
+			pcall(callback, optName)
+		end
+		if self.Callback and self.Callback ~= callback then
+			pcall(self.Callback, optName)
+		end
+		_G.BSMTConfigData[self.ConfigIdentifier] = optName
+		if self.Flag and (KNOWN_G_SET[self.Flag] or read_flag_val(self.Flag) ~= nil) then
+			write_flag_val(self.Flag, optName)
+		end
+		self:_highlightOption(optName)
+		if self._collapse then self._collapse() end
+		self._applying = false
+	end)
+
+	self._optionButtons[optStr] = btn
+	if self.Selected ~= nil and tostring(self.Selected) == optStr then
+		self:_highlightOption(self.Selected)
+	end
+	return btn
+end
+
+function dropdownHandler:Set(val, fireCallback)
+	restore_id()
+	self._applying = true
+	self.Selected = val
+	local valStr = tostring(val)
+	if self.Prefix and valStr:sub(1, #self.Prefix) ~= self.Prefix then
+		self:ChangeText(self.Prefix .. valStr)
+	else
+		self:ChangeText(valStr)
+	end
+	self:_highlightOption(val)
+	_G.BSMTConfigData[self.ConfigIdentifier] = val
+	if self.Flag and (KNOWN_G_SET[self.Flag] or read_flag_val(self.Flag) ~= nil) then
+		write_flag_val(self.Flag, val)
+	end
+	if fireCallback ~= false then
+		if self.Callback then
+			pcall(self.Callback, val)
+		elseif self._optionCallbacks and self._optionCallbacks[valStr] then
+			pcall(self._optionCallbacks[valStr], val)
+		end
+	end
+	self._applying = false
+end
+
 function dropdownHandler:Clear()
+	restore_id()
+	if self._optionCallbacks then table.clear(self._optionCallbacks) end
+	if self._optionButtons then table.clear(self._optionButtons) end
 	for _, ch in ipairs(self.ElementToParentChildren:GetChildren()) do
 		if ch:IsA("GuiObject") then ch:Destroy() end
 	end
@@ -2733,16 +3461,12 @@ function dropdownHandler:SetOptions(list)
 	for _, opt in ipairs(list or {}) do
 		self:Button(tostring(opt), function()
 			self:Set(opt, true)
-			if self.IsExpanded then
-				self.IsExpanded = false
-				tweenservice:Create(self.Instance.DropdownButton.ButtonBackground.DropdownImage, TweenInfo.new(0.2, Enum.EasingStyle.Quad), { Rotation = 180 }):Play()
-				tweenservice:Create(self.Instance, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), { Size = UDim2.new(1, 0, 0, M.ElementH) }):Play()
-			end
 		end)
 	end
 end
 
 function elementHandler:Slider(sliderName, callback, maximumValue, minimumValue, flag)
+	restore_id()
 	local slider = setmetatable({}, sliderHandler)
 	local sliderInstance = original_elements.Slider:Clone()
 	local isDragging = false
@@ -2757,7 +3481,7 @@ function elementHandler:Slider(sliderName, callback, maximumValue, minimumValue,
 	local sliderValue = minimumValue
 	callback = callback or function() end
 
-	local syncKey = flag or sliderName or "N/A"
+	local syncKey = resolve_sync_flag(flag, sliderName, callback) or sliderName or "N/A"
 	local lastRoundedValue = nil
 
 	local function render_value(v)
@@ -2790,6 +3514,7 @@ function elementHandler:Slider(sliderName, callback, maximumValue, minimumValue,
 	sliderInstance.SliderBackground.InputBegan:Connect(function(input)
 		if is_primary_input(input) then
 			isDragging = true
+			set_scroll_lock(sliderInstance, true)
 			apply_from_x(input.Position.X)
 		end
 	end)
@@ -2803,6 +3528,7 @@ function elementHandler:Slider(sliderName, callback, maximumValue, minimumValue,
 	track_conn(uis.InputEnded:Connect(function(input)
 		if isDragging and is_primary_input(input) then
 			isDragging = false
+			set_scroll_lock(sliderInstance, false)
 		end
 	end))
 
@@ -2845,11 +3571,12 @@ function elementHandler:Slider(sliderName, callback, maximumValue, minimumValue,
 	sliderValue = slider._currentValue
 	lastRoundedValue = math.round(slider._currentValue)
 	_G.BSMTConfigData[syncKey] = slider._currentValue
-	if flag or read_flag_val(syncKey) ~= nil then
+	if flag or KNOWN_G_SET[syncKey] or read_flag_val(syncKey) ~= nil then
 		write_flag_val(syncKey, slider._currentValue)
 	end
 
 	function slider:SetValue(v, fireCb)
+		restore_id()
 		local num = tonumber(v)
 		if not num then return end
 		num = math.clamp(num, self._minValue, self._maxValue)
@@ -2865,7 +3592,7 @@ function elementHandler:Slider(sliderName, callback, maximumValue, minimumValue,
 	watch_genv(syncKey, function(v)
 		local num = tonumber(v)
 		if num and math.round(num) ~= math.round(slider._currentValue) then
-			slider:SetValue(num, true)
+			slider:SetValue(num, false)
 		end
 	end, function() return isDragging end)
 
@@ -3004,6 +3731,7 @@ function elementHandler:SearchBar(placeholderText)
 end
 
 function elementHandler:Keybind(keybindName, callback, defaultKey, flag)
+	restore_id()
 	local keybind = setmetatable({}, keybindHandler)
 	local inst = original_elements.Keybind:Clone()
 	local tag = inst.BoxBackground
@@ -3040,6 +3768,7 @@ function elementHandler:Keybind(keybindName, callback, defaultKey, flag)
 	end
 
 	function keybind:SetBinding(binding, dispName)
+		restore_id()
 		currentBinding = binding
 		set_display(dispName)
 		_G.BSMTConfigData[self.ConfigIdentifier] = encode_binding(binding)
@@ -3073,6 +3802,26 @@ function elementHandler:Keybind(keybindName, callback, defaultKey, flag)
 		getBinding = function() return currentBinding end,
 		callback = function() callback() end,
 	})
+
+	local touchHoldToken = 0
+	inst.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Touch then
+			touchHoldToken += 1
+			local myToken = touchHoldToken
+			task.delay(0.45, function()
+				if touchHoldToken == myToken then
+					if listenConn then listenConn:Disconnect() listenConn = nil end
+					isListening = false
+					keybind:SetBinding(nil, nil)
+				end
+			end)
+		end
+	end)
+	inst.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Touch then
+			touchHoldToken += 1
+		end
+	end)
 
 	inst.Activated:Connect(begin_listening)
 	inst.MouseButton2Click:Connect(function()
@@ -3114,6 +3863,7 @@ function elementHandler:Keybind(keybindName, callback, defaultKey, flag)
 end
 
 function elementHandler:TextBox(textBoxName, callback, flag)
+	restore_id()
 	local textBox = setmetatable({}, textBoxHandler)
 	local textBoxInstance = original_elements.TextBox:Clone()
 	local placeholderText = "Type here..."
@@ -3136,6 +3886,7 @@ function elementHandler:TextBox(textBoxName, callback, flag)
 	textBox.Callback = callback
 
 	function textBox:SetText(str, fireCb)
+		restore_id()
 		str = tostring(str or "")
 		textBoxText.Text = str
 		_G.BSMTConfigData[self.ConfigIdentifier] = str
@@ -3183,6 +3934,7 @@ function elementHandler:TextBox(textBoxName, callback, flag)
 end
 
 function elementHandler:ColorWheel(colorWheelName, callback, flag)
+	restore_id()
 	local colorWheel = setmetatable({}, colorWheelHandler)
 	local colorWheelInstance = original_elements.ColorWheel:Clone()
 	local draggingWheel = false
@@ -3205,7 +3957,7 @@ function elementHandler:ColorWheel(colorWheelName, callback, flag)
 	local hue, saturation, value = 0, 0, 1
 	colorWheelName = colorWheelName or "Color"
 	callback = callback or function() end
-	local syncKey = flag or colorWheelName
+	local syncKey = resolve_sync_flag(flag, colorWheelName, callback) or colorWheelName
 
 	local function update_visuals(fireCb)
 		local color = Color3.fromHSV(hue, saturation, value)
@@ -3271,6 +4023,7 @@ function elementHandler:ColorWheel(colorWheelName, callback, flag)
 	slider.InputBegan:Connect(function(inp)
 		if is_primary_input(inp) then
 			draggingSlider = true
+			set_scroll_lock(colorWheelInstance, true)
 			apply_slider_from_x(inp.Position.X)
 		end
 	end)
@@ -3278,6 +4031,7 @@ function elementHandler:ColorWheel(colorWheelName, callback, flag)
 	wheel.InputBegan:Connect(function(inp)
 		if is_primary_input(inp) then
 			draggingWheel = true
+			set_scroll_lock(colorWheelInstance, true)
 			apply_ring_from_xy(inp.Position.X, inp.Position.Y)
 		end
 	end)
@@ -3290,9 +4044,10 @@ function elementHandler:ColorWheel(colorWheelName, callback, flag)
 	end))
 
 	track_conn(uis.InputEnded:Connect(function(inp)
-		if is_primary_input(inp) then
+		if is_primary_input(inp) and (draggingSlider or draggingWheel) then
 			draggingSlider = false
 			draggingWheel = false
+			set_scroll_lock(colorWheelInstance, false)
 		end
 	end))
 
@@ -3323,6 +4078,7 @@ function elementHandler:ColorWheel(colorWheelName, callback, flag)
 	register_config_element(colorWheel.ConfigIdentifier, colorWheel)
 
 	function colorWheel:SetColor(c3, fireCb)
+		restore_id()
 		local parsed = parse_color(c3)
 		if parsed then set_color_from_c3(parsed, fireCb) end
 	end
@@ -3358,7 +4114,7 @@ function elementHandler:ColorWheel(colorWheelName, callback, flag)
 	watch_genv(syncKey, function(v)
 		local c = parse_color(v)
 		if c and c ~= colorWheel._currentColor then
-			set_color_from_c3(c, true)
+			set_color_from_c3(c, false)
 		end
 	end, function() return draggingWheel or draggingSlider end)
 
@@ -3367,234 +4123,360 @@ end
 
 create_original_elements()
 
-local notificationHandler = {}
-notificationHandler.__index = notificationHandler
+do
+	local notificationHandler = {}
+	notificationHandler.__index = notificationHandler
 
-local notificationContainer
-local activeNotifications = {}
+	local notificationContainer
+	local activeNotifications = {}
+	local notifCornerMode = "Top Right"
+	local maxVisibleNotifs = 6
 
-local function create_notification_container()
-	if notificationContainer then return notificationContainer end
-	local container = Instance.new("ScreenGui")
-	container.Name = "BSMTNotifications"
-	container.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	container.IgnoreGuiInset = true
-	container.DisplayOrder = 998
-	parent_protected(container)
-	return container
-end
-
-local function create_notification()
-	local root = Instance.new("Frame")
-	local pill = Instance.new("Frame")
-	local pillCorner = Instance.new("UICorner")
-	local pillStroke = Instance.new("UIStroke")
-	local accentBar = Instance.new("Frame")
-	local accentCorner = Instance.new("UICorner")
-	local icon = Instance.new("ImageLabel")
-	local closeBtn = Instance.new("TextButton")
-	local titleLbl = Instance.new("TextLabel")
-	local bodyLbl = Instance.new("TextLabel")
-	local bodyPad = Instance.new("UIPadding")
-	local progressBar = Instance.new("Frame")
-	local progressFill = Instance.new("Frame")
-	local progressCorner = Instance.new("UICorner")
-
-	root.Name = "Notification"
-	root.BackgroundTransparency = 1
-	root.BorderSizePixel = 0
-	root.Size = UDim2.new(0, 290, 0, 64)
-	root.Position = UDim2.new(1, 310, 0, 12)
-
-	pill.Name = "Background"
-	pill.Parent = root
-	pill.BackgroundColor3 = Theme.Background
-	pill.BorderSizePixel = 0
-	pill.Size = UDim2.new(1, 0, 1, 0)
-
-	pillCorner.CornerRadius = UDim.new(0, 8)
-	pillCorner.Parent = pill
-
-	pillStroke.Color = Theme.Stroke
-	pillStroke.Thickness = 1
-	pillStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	pillStroke.Parent = pill
-
-	accentBar.Name = "AccentBar"
-	accentBar.Parent = pill
-	accentBar.AnchorPoint = Vector2.new(0, 0.5)
-	accentBar.Position = UDim2.new(0, 0, 0.5, 0)
-	accentBar.Size = UDim2.new(0, 3, 0.65, 0)
-	accentBar.BackgroundColor3 = Theme.Accent
-	accentBar.BorderSizePixel = 0
-	accentBar.ZIndex = 3
-
-	accentCorner.CornerRadius = UDim.new(1, 0)
-	accentCorner.Parent = accentBar
-
-	icon.Name = "Icon"
-	icon.Parent = pill
-	icon.AnchorPoint = Vector2.new(0, 0.5)
-	icon.BackgroundTransparency = 1
-	icon.Position = UDim2.new(0, 12, 0.36, 0)
-	icon.Size = UDim2.fromOffset(15, 15)
-	icon.ImageColor3 = Theme.Accent
-	icon.ZIndex = 2
-
-	closeBtn.Name = "CloseBtn"
-	closeBtn.Parent = pill
-	closeBtn.AnchorPoint = Vector2.new(1, 0)
-	closeBtn.BackgroundTransparency = 1
-	closeBtn.Position = UDim2.new(1, -6, 0, 4)
-	closeBtn.Size = UDim2.fromOffset(18, 18)
-	closeBtn.Font = Enum.Font.GothamBold
-	closeBtn.Text = "×"
-	closeBtn.TextColor3 = Theme.TextDim
-	closeBtn.TextSize = 15
-	closeBtn.AutoButtonColor = false
-	closeBtn.ZIndex = 4
-
-	titleLbl.Name = "TitleLabel"
-	titleLbl.Parent = pill
-	titleLbl.BackgroundTransparency = 1
-	titleLbl.Position = UDim2.new(0, 34, 0, 9)
-	titleLbl.Size = UDim2.new(1, -56, 0, 15)
-	titleLbl.Font = Enum.Font.GothamBold
-	titleLbl.Text = "Info"
-	titleLbl.TextColor3 = Theme.TextBright
-	titleLbl.TextSize = 13
-	titleLbl.TextXAlignment = Enum.TextXAlignment.Left
-	titleLbl.TextTruncate = Enum.TextTruncate.AtEnd
-	titleLbl.ZIndex = 2
-
-	bodyLbl.Name = "TextLabel"
-	bodyLbl.Parent = pill
-	bodyLbl.BackgroundTransparency = 1
-	bodyLbl.Position = UDim2.new(0, 34, 0, 27)
-	bodyLbl.Size = UDim2.new(1, -42, 0, 26)
-	bodyLbl.Font = Enum.Font.Gotham
-	bodyLbl.Text = "Notification"
-	bodyLbl.TextColor3 = Theme.TextMuted
-	bodyLbl.TextSize = 12
-	bodyLbl.TextWrapped = true
-	bodyLbl.TextXAlignment = Enum.TextXAlignment.Left
-	bodyLbl.TextYAlignment = Enum.TextYAlignment.Top
-	bodyLbl.ZIndex = 2
-
-	bodyPad.PaddingRight = UDim.new(0, 6)
-	bodyPad.Parent = bodyLbl
-
-	progressBar.Name = "ProgressBar"
-	progressBar.Parent = pill
-	progressBar.AnchorPoint = Vector2.new(0, 1)
-	progressBar.BackgroundColor3 = Theme.Track
-	progressBar.BorderSizePixel = 0
-	progressBar.Position = UDim2.new(0, 0, 1, 0)
-	progressBar.Size = UDim2.new(1, 0, 0, 2)
-	progressBar.ZIndex = 2
-
-	progressFill.Name = "ProgressBarInner"
-	progressFill.Parent = progressBar
-	progressFill.BackgroundColor3 = Theme.Accent
-	progressFill.BorderSizePixel = 0
-	progressFill.Size = UDim2.new(1, 0, 1, 0)
-	progressFill.ZIndex = 3
-
-	progressCorner.CornerRadius = UDim.new(1, 0)
-	progressCorner.Parent = progressFill
-
-	return root
-end
-
-local function update_notification_positions()
-	local currentY = 12
-	for i = 1, #activeNotifications do
-		local notif = activeNotifications[i]
-		if notif and notif.Instance and notif.Instance.Parent then
-			tweenservice:Create(notif.Instance, TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
-				Position = UDim2.new(1, -302, 0, currentY)
-			}):Play()
-			currentY += notif.Instance.AbsoluteSize.Y + 8
-		end
-	end
-end
-
-function Library.Notification(message, notifType, duration)
-	local notification = setmetatable({}, notificationHandler)
-	if not notificationContainer then
-		notificationContainer = create_notification_container()
+	local function create_notification_container()
+		if notificationContainer and notificationContainer.Parent then return notificationContainer end
+		local container = Instance.new("ScreenGui")
+		container.Name = "BSMTNotifications"
+		container.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+		container.IgnoreGuiInset = true
+		container.ResetOnSpawn = false
+		container.DisplayOrder = 998
+		parent_protected(container)
+		notificationContainer = container
+		return container
 	end
 
-	local inst = create_notification()
-	local pill = inst.Background
+	local function create_notification_card(cardW, cardH)
+		local root = Instance.new("TextButton")
+		local pill = Instance.new("Frame")
+		local pillCorner = Instance.new("UICorner")
+		local pillStroke = Instance.new("UIStroke")
+		local accentBar = Instance.new("Frame")
+		local accentCorner = Instance.new("UICorner")
+		local iconBadge = Instance.new("Frame")
+		local iconBadgeCorner = Instance.new("UICorner")
+		local iconBadgeStroke = Instance.new("UIStroke")
+		local iconSym = Instance.new("TextLabel")
+		local closeBtn = Instance.new("TextButton")
+		local timerLbl = Instance.new("TextLabel")
+		local titleLbl = Instance.new("TextLabel")
+		local bodyLbl = Instance.new("TextLabel")
+		local progressBar = Instance.new("Frame")
+		local progressFill = Instance.new("Frame")
+		local progressCorner = Instance.new("UICorner")
 
-	message = message or "Notification"
-	notifType = notifType or "info"
-	duration = duration or 4
+		root.Name = "Notification"
+		root.BackgroundTransparency = 1
+		root.BorderSizePixel = 0
+		root.AutoButtonColor = false
+		root.Text = ""
+		root.Size = UDim2.fromOffset(cardW, cardH)
 
-	local typeConfigs = {
-		success = { title = "Success", icon = "rbxassetid://11295279671", color = Color3.fromRGB(75, 210, 130) },
-		error   = { title = "Error",   icon = "rbxassetid://11295280827", color = Color3.fromRGB(235, 80, 80) },
-		warning = { title = "Warning", icon = "rbxassetid://11295279671", color = Color3.fromRGB(240, 185, 65) },
-		info    = { title = "Info",    icon = "rbxassetid://11454041890", color = Theme.Accent },
-	}
-	local cfg = typeConfigs[notifType:lower()] or typeConfigs.info
+		pill.Name = "Background"
+		pill.Parent = root
+		pill.BackgroundColor3 = Theme.Background
+		pill.BackgroundTransparency = 0.04
+		pill.BorderSizePixel = 0
+		pill.Size = UDim2.new(1, 0, 1, 0)
+		pill.ClipsDescendants = true
 
-	pill.AccentBar.BackgroundColor3 = cfg.color
-	pill.Icon.Image = cfg.icon
-	pill.Icon.ImageColor3 = cfg.color
-	pill.TitleLabel.Text = cfg.title
-	pill.TitleLabel.TextColor3 = cfg.color
-	pill.TextLabel.Text = message
-	pill.ProgressBar.ProgressBarInner.BackgroundColor3 = cfg.color
+		pillCorner.CornerRadius = UDim.new(0, 8)
+		pillCorner.Parent = pill
 
-	notification.Instance = inst
-	notification.Duration = duration
-	notification.Type = notifType
+		pillStroke.Color = Theme.Stroke
+		pillStroke.Thickness = 1
+		pillStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		pillStroke.Parent = pill
 
-	inst.Parent = notificationContainer
-	table.insert(activeNotifications, notification)
+		accentBar.Name = "AccentBar"
+		accentBar.Parent = pill
+		accentBar.AnchorPoint = Vector2.new(0, 0.5)
+		accentBar.Position = UDim2.new(0, 0, 0.5, 0)
+		accentBar.Size = UDim2.new(0, 3, 1, -14)
+		accentBar.BackgroundColor3 = Theme.Accent
+		accentBar.BorderSizePixel = 0
+		accentBar.ZIndex = 3
 
-	pill.CloseBtn.Activated:Connect(function()
-		notification:Dismiss()
-	end)
+		accentCorner.CornerRadius = UDim.new(1, 0)
+		accentCorner.Parent = accentBar
 
-	tweenservice:Create(inst, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
-		Position = UDim2.new(1, -302, 0, 12)
-	}):Play()
+		iconBadge.Name = "IconBadge"
+		iconBadge.Parent = pill
+		iconBadge.AnchorPoint = Vector2.new(0, 0.5)
+		iconBadge.Position = UDim2.new(0, 11, 0.5, -1)
+		iconBadge.Size = UDim2.fromOffset(26, 26)
+		iconBadge.BackgroundColor3 = Theme.Element
+		iconBadge.BorderSizePixel = 0
+		iconBadge.ZIndex = 2
 
-	update_notification_positions()
+		iconBadgeCorner.CornerRadius = UDim.new(0, 6)
+		iconBadgeCorner.Parent = iconBadge
 
-	local fill = pill.ProgressBar.ProgressBarInner
-	task.delay(0.25, function()
-		if fill and fill.Parent then
-			tweenservice:Create(fill, TweenInfo.new(duration, Enum.EasingStyle.Linear), { Size = UDim2.new(0, 0, 1, 0) }):Play()
+		iconBadgeStroke.Color = Theme.Stroke
+		iconBadgeStroke.Thickness = 1
+		iconBadgeStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		iconBadgeStroke.Parent = iconBadge
+
+		iconSym.Name = "IconSym"
+		iconSym.Parent = iconBadge
+		iconSym.BackgroundTransparency = 1
+		iconSym.Size = UDim2.new(1, 0, 1, 0)
+		iconSym.Font = Enum.Font.GothamBold
+		iconSym.Text = "i"
+		iconSym.TextColor3 = Theme.Accent
+		iconSym.TextSize = 13
+		iconSym.ZIndex = 3
+
+		closeBtn.Name = "CloseBtn"
+		closeBtn.Parent = pill
+		closeBtn.AnchorPoint = Vector2.new(1, 0)
+		closeBtn.BackgroundTransparency = 1
+		closeBtn.Position = UDim2.new(1, -6, 0, 6)
+		closeBtn.Size = UDim2.fromOffset(20, 20)
+		closeBtn.Font = Enum.Font.GothamBold
+		closeBtn.Text = "×"
+		closeBtn.TextColor3 = Theme.TextDim
+		closeBtn.TextSize = 16
+		closeBtn.AutoButtonColor = false
+		closeBtn.ZIndex = 4
+
+		timerLbl.Name = "TimerLabel"
+		timerLbl.Parent = pill
+		timerLbl.AnchorPoint = Vector2.new(1, 0)
+		timerLbl.BackgroundTransparency = 1
+		timerLbl.Position = UDim2.new(1, -28, 0, 9)
+		timerLbl.Size = UDim2.fromOffset(36, 14)
+		timerLbl.Font = Enum.Font.GothamMedium
+		timerLbl.Text = ""
+		timerLbl.TextColor3 = Theme.TextDim
+		timerLbl.TextSize = 10
+		timerLbl.TextXAlignment = Enum.TextXAlignment.Right
+		timerLbl.ZIndex = 3
+
+		titleLbl.Name = "TitleLabel"
+		titleLbl.Parent = pill
+		titleLbl.BackgroundTransparency = 1
+		titleLbl.Position = UDim2.new(0, 46, 0, 8)
+		titleLbl.Size = UDim2.new(1, -112, 0, 16)
+		titleLbl.Font = Enum.Font.GothamBold
+		titleLbl.Text = "Info"
+		titleLbl.TextColor3 = Theme.TextBright
+		titleLbl.TextSize = 13
+		titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+		titleLbl.TextTruncate = Enum.TextTruncate.AtEnd
+		titleLbl.ZIndex = 2
+
+		bodyLbl.Name = "TextLabel"
+		bodyLbl.Parent = pill
+		bodyLbl.BackgroundTransparency = 1
+		bodyLbl.Position = UDim2.new(0, 46, 0, 25)
+		bodyLbl.Size = UDim2.new(1, -56, 1, -33)
+		bodyLbl.Font = Enum.Font.Gotham
+		bodyLbl.Text = "Notification"
+		bodyLbl.TextColor3 = Theme.Text
+		bodyLbl.TextSize = 12
+		bodyLbl.TextWrapped = true
+		bodyLbl.TextXAlignment = Enum.TextXAlignment.Left
+		bodyLbl.TextYAlignment = Enum.TextYAlignment.Top
+		bodyLbl.ZIndex = 2
+
+		progressBar.Name = "ProgressBar"
+		progressBar.Parent = pill
+		progressBar.AnchorPoint = Vector2.new(0, 1)
+		progressBar.BackgroundColor3 = Theme.Track
+		progressBar.BorderSizePixel = 0
+		progressBar.Position = UDim2.new(0, 0, 1, 0)
+		progressBar.Size = UDim2.new(1, 0, 0, 2)
+		progressBar.ZIndex = 2
+
+		progressFill.Name = "ProgressBarInner"
+		progressFill.Parent = progressBar
+		progressFill.BackgroundColor3 = Theme.Accent
+		progressFill.BorderSizePixel = 0
+		progressFill.Size = UDim2.new(1, 0, 1, 0)
+		progressFill.ZIndex = 3
+
+		progressCorner.CornerRadius = UDim.new(1, 0)
+		progressCorner.Parent = progressFill
+
+		return root
+	end
+
+	local function get_notif_target_pos(cardW, cardH, stackOffset)
+		local isLeft = notifCornerMode:find("Left") ~= nil
+		local isBottom = notifCornerMode:find("Bottom") ~= nil
+		local xScale = isLeft and 0 or 1
+		local xOff = isLeft and 14 or -(cardW + 14)
+		local yScale = isBottom and 1 or 0
+		local yOff = isBottom and -(stackOffset + cardH) or stackOffset
+		return UDim2.new(xScale, xOff, yScale, yOff)
+	end
+
+	local function get_notif_offscreen_pos(cardW, yScale, yOff)
+		local isLeft = notifCornerMode:find("Left") ~= nil
+		if isLeft then
+			return UDim2.new(0, -(cardW + 24), yScale, yOff)
+		else
+			return UDim2.new(1, 24, yScale, yOff)
 		end
-	end)
+	end
 
-	task.delay(duration, function()
-		notification:Dismiss()
-	end)
+	local function update_notification_positions()
+		local stackY = 14
+		for i = #activeNotifications, 1, -1 do
+			local notif = activeNotifications[i]
+			if notif and notif.Instance and notif.Instance.Parent and not notif._dismissing then
+				local sz = notif.Instance.Size
+				local cw, ch = sz.X.Offset, sz.Y.Offset
+				local targetPos = get_notif_target_pos(cw, ch, stackY)
+				tweenservice:Create(notif.Instance, TweenInfo.new(0.22, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+					Position = targetPos
+				}):Play()
+				stackY += ch + 8
+			end
+		end
+	end
 
-	return notification
-end
+	function Library.SetNotificationPosition(mode)
+		if type(mode) == "string" and mode ~= "" then
+			notifCornerMode = mode
+			_G.BSMTConfigData["notif_position"] = mode
+			update_notification_positions()
+		end
+	end
 
-function notificationHandler:Dismiss()
-	if not self.Instance or not self.Instance.Parent or self._dismissing then return end
-	self._dismissing = true
-	tweenservice:Create(self.Instance, TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {
-		Position = UDim2.new(1, 310, 0, self.Instance.Position.Y.Offset)
-	}):Play()
-	task.delay(0.26, function()
+	function Library.Notification(messageOrOpts, notifType, duration, customTitle)
+		restore_id()
+		local message, nType, dur, titleOverride
+		if type(messageOrOpts) == "table" then
+			message = messageOrOpts.Text or messageOrOpts.Message or messageOrOpts.Content or "Notification"
+			nType = messageOrOpts.Type or notifType or "info"
+			dur = tonumber(messageOrOpts.Duration) or tonumber(duration) or 4
+			titleOverride = messageOrOpts.Title or customTitle
+		else
+			message = tostring(messageOrOpts or "Notification")
+			nType = tostring(notifType or "info")
+			dur = tonumber(duration) or 4
+			titleOverride = customTitle
+		end
+		dur = math.clamp(dur, 1, 20)
+
+		while #activeNotifications >= maxVisibleNotifs do
+			local oldest = activeNotifications[1]
+			if oldest then oldest:Dismiss() else break end
+			table.remove(activeNotifications, 1)
+		end
+
+		local notification = setmetatable({}, notificationHandler)
+		create_notification_container()
+
+		local cardW = is_mobile and math.min(280, math.round(cam.ViewportSize.X * 0.78)) or 300
+		local textParams = Instance.new("GetTextBoundsParams")
+		textParams.Text = message
+		textParams.Font = Font.fromEnum(Enum.Font.Gotham)
+		textParams.Size = 12
+		textParams.Width = math.max(120, cardW - 58)
+		local okBounds, bounds = pcall(function() return textservice:GetTextBoundsAsync(textParams) end)
+		local textH = (okBounds and bounds and bounds.Y) or 18
+		local cardH = math.clamp(textH + 38, 56, 130)
+
+		local inst = create_notification_card(cardW, cardH)
+		local pill = inst.Background
+
+		local typeConfigs = {
+			success = { title = "Success", sym = "✓", color = Color3.fromRGB(75, 215, 135) },
+			error   = { title = "Error",   sym = "✕", color = Color3.fromRGB(240, 82, 82) },
+			warning = { title = "Warning", sym = "!", color = Color3.fromRGB(245, 190, 65) },
+			info    = { title = "Info",    sym = "i", color = Theme.Accent },
+		}
+		local cfg = typeConfigs[nType:lower()] or typeConfigs.info
+
+		pill.AccentBar.BackgroundColor3 = cfg.color
+		pill.IconBadge.IconSym.Text = cfg.sym
+		pill.IconBadge.IconSym.TextColor3 = cfg.color
+		pill.IconBadge.UIStroke.Color = cfg.color:Lerp(Theme.Stroke, 0.55)
+		pill.TitleLabel.Text = titleOverride or cfg.title
+		pill.TitleLabel.TextColor3 = cfg.color
+		pill.TextLabel.Text = message
+		pill.ProgressBar.ProgressBarInner.BackgroundColor3 = cfg.color
+
+		local startTarget = get_notif_target_pos(cardW, cardH, 14)
+		inst.Position = get_notif_offscreen_pos(cardW, startTarget.Y.Scale, startTarget.Y.Offset)
+
+		notification.Instance = inst
+		notification.Duration = dur
+		notification.Remaining = dur
+		notification.Type = nType
+		notification._paused = false
+
+		inst.Parent = notificationContainer
+		table.insert(activeNotifications, notification)
+
+		pill.CloseBtn.Activated:Connect(function()
+			notification:Dismiss()
+		end)
+		inst.Activated:Connect(function()
+			notification:Dismiss()
+		end)
+		inst.MouseEnter:Connect(function()
+			notification._paused = true
+			pill.UIStroke.Color = cfg.color:Lerp(Theme.Stroke, 0.35)
+		end)
+		inst.MouseLeave:Connect(function()
+			notification._paused = false
+			pill.UIStroke.Color = Theme.Stroke
+		end)
+
+		update_notification_positions()
+
+		local fill = pill.ProgressBar.ProgressBarInner
+		local timerLbl = pill.TimerLabel
+		task.spawn(function()
+			local lastTick = os.clock()
+			while library_alive and inst.Parent and not notification._dismissing do
+				local now = os.clock()
+				local dt = now - lastTick
+				lastTick = now
+				if not notification._paused then
+					notification.Remaining = math.max(0, notification.Remaining - dt)
+					local pct = math.clamp(notification.Remaining / dur, 0, 1)
+					fill.Size = UDim2.new(pct, 0, 1, 0)
+					timerLbl.Text = string.format("%.1fs", notification.Remaining)
+					if notification.Remaining <= 0 then
+						notification:Dismiss()
+						break
+					end
+				else
+					timerLbl.Text = "hold"
+				end
+				task.wait(0.04)
+			end
+		end)
+
+		return notification
+	end
+
+	function notificationHandler:Dismiss()
+		if not self.Instance or not self.Instance.Parent or self._dismissing then return end
+		self._dismissing = true
+		local sz = self.Instance.Size
+		local curPos = self.Instance.Position
+		local outPos = get_notif_offscreen_pos(sz.X.Offset, curPos.Y.Scale, curPos.Y.Offset)
 		for i, n in ipairs(activeNotifications) do
 			if n == self then
 				table.remove(activeNotifications, i)
 				break
 			end
 		end
-		if self.Instance then self.Instance:Destroy() end
 		update_notification_positions()
-	end)
+		tweenservice:Create(self.Instance, TweenInfo.new(0.22, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {
+			Position = outPos
+		}):Play()
+		task.delay(0.24, function()
+			if self.Instance then
+				pcall(function() self.Instance:Destroy() end)
+			end
+		end)
+	end
 end
 
 local currentGameId = tostring(game.PlaceId)
@@ -3611,10 +4493,45 @@ local function ensure_config_folders()
 end
 ensure_config_folders()
 
+local function snapshot_config_table()
+	local payload = {}
+	for k, v in pairs(_G.BSMTConfigData) do
+		if typeof(v) == "Color3" then
+			payload[k] = { math.round(v.R * 255), math.round(v.G * 255), math.round(v.B * 255) }
+		elseif type(v) == "boolean" or type(v) == "number" or type(v) == "string" or type(v) == "table" then
+			payload[k] = v
+		end
+	end
+	for _, k in ipairs(KNOWN_G_KEYS) do
+		local gv = read_flag_val(k)
+		if gv ~= nil then
+			if typeof(gv) == "Color3" then
+				payload[k] = { math.round(gv.R * 255), math.round(gv.G * 255), math.round(gv.B * 255) }
+			elseif type(gv) == "boolean" or type(gv) == "number" or type(gv) == "string" then
+				payload[k] = gv
+			elseif type(gv) == "table" then
+				payload[k] = deep_copy_table(gv)
+			end
+		end
+	end
+	return payload
+end
+
 local function apply_config_table(result)
+	restore_id()
 	if type(result) ~= "table" then return false end
 	for identifier, value in pairs(result) do
 		_G.BSMTConfigData[identifier] = value
+		if COLOR_G_KEYS[identifier] then
+			local c3 = parse_color(value)
+			if c3 then write_flag_val(identifier, c3) end
+		elseif KNOWN_G_SET[identifier] then
+			if type(value) == "table" then
+				write_flag_val(identifier, deep_copy_table(value))
+			else
+				write_flag_val(identifier, value)
+			end
+		end
 		for_each_config_element(identifier, function(element)
 			if element.Type == "Toggle" then
 				element:Apply(value == true, true)
@@ -3649,12 +4566,29 @@ local function apply_config_table(result)
 			end
 		end)
 	end
+	if type(result.notif_position) == "string" then
+		Library.SetNotificationPosition(result.notif_position)
+	end
+	if type(result.watermark_position) == "string" and Library.Watermark and Library.Watermark.SetPositionPreset then
+		Library.Watermark.SetPositionPreset(result.watermark_position)
+	end
+	return true
+end
+
+function Library.ResetConfig()
+	restore_id()
+	local defaults = {}
+	for k, v in pairs(default_g_values) do
+		defaults[k] = type(v) == "table" and deep_copy_table(v) or v
+	end
+	apply_config_table(defaults)
+	Library.Notification("Reset all settings to defaults", "info", 3, "Config Reset")
 	return true
 end
 
 function Library.ExportConfig()
 	local ok, encoded = pcall(function()
-		return httpservice:JSONEncode(_G.BSMTConfigData)
+		return httpservice:JSONEncode(snapshot_config_table())
 	end)
 	return ok and encoded or "{}"
 end
@@ -3674,20 +4608,24 @@ function Library.ImportConfig(jsonStr)
 end
 
 function Library.SaveConfig(configName)
+	restore_id()
 	if not writefile then
 		Library.Notification("Executor doesn't support writefile", "error", 4)
 		return false
 	end
 	ensure_config_folders()
-	configName = (configName and configName ~= "") and configName or "default"
+	configName = (configName and configName ~= "") and configName:gsub("[/\\:%*%?\"<>|]", "") or "default"
+	if configName == "" then configName = "default" end
 	local configPath = gameConfigFolder .. "/" .. configName .. ".cfg"
 
+	local payload = snapshot_config_table()
 	local ok, err = pcall(function()
-		writefile(configPath, httpservice:JSONEncode(_G.BSMTConfigData))
+		writefile(configPath, httpservice:JSONEncode(payload))
 	end)
 
 	if ok then
-		Library.Notification("Config '" .. configName .. "' saved!", "success", 3)
+		Library._activeProfileName = configName
+		Library.Notification("Profile '" .. configName .. "' saved!", "success", 3, "Config Saved")
 		return true
 	else
 		Library.Notification("Failed to save: " .. tostring(err), "error", 4)
@@ -3696,6 +4634,7 @@ function Library.SaveConfig(configName)
 end
 
 function Library.LoadConfig(configName)
+	restore_id()
 	if not readfile or not isfile then
 		Library.Notification("Executor doesn't support readfile", "error", 4)
 		return false
@@ -3704,7 +4643,7 @@ function Library.LoadConfig(configName)
 	local configPath = gameConfigFolder .. "/" .. configName .. ".cfg"
 
 	if not isfile(configPath) then
-		Library.Notification("Config '" .. configName .. "' not found", "warning", 3)
+		Library.Notification("Profile '" .. configName .. "' not found", "warning", 3)
 		return false
 	end
 
@@ -3714,22 +4653,24 @@ function Library.LoadConfig(configName)
 
 	if ok and type(result) == "table" then
 		apply_config_table(result)
-		Library.Notification("Config '" .. configName .. "' loaded!", "success", 3)
+		Library._activeProfileName = configName
+		Library.Notification("Profile '" .. configName .. "' loaded!", "success", 3, "Config Loaded")
 		return true
 	else
-		Library.Notification("Failed to load config", "error", 4)
+		Library.Notification("Failed to parse config file", "error", 4)
 		return false
 	end
 end
 
 function Library.DeleteConfig(configName)
+	restore_id()
 	if not delfile or not isfile then
 		Library.Notification("Executor doesn't support delfile", "error", 4)
 		return false
 	end
 	local configPath = gameConfigFolder .. "/" .. (configName or "") .. ".cfg"
 	if not isfile(configPath) then
-		Library.Notification("Config '" .. tostring(configName) .. "' not found", "warning", 3)
+		Library.Notification("Profile '" .. tostring(configName) .. "' not found", "warning", 3)
 		return false
 	end
 	local ok = pcall(function() delfile(configPath) end)
@@ -3737,10 +4678,13 @@ function Library.DeleteConfig(configName)
 		if Library.GetAutoLoad() == configName then
 			Library.SetAutoLoad("")
 		end
-		Library.Notification("Config '" .. configName .. "' deleted", "info", 3)
+		if Library._activeProfileName == configName then
+			Library._activeProfileName = nil
+		end
+		Library.Notification("Profile '" .. configName .. "' deleted", "info", 3)
 		return true
 	else
-		Library.Notification("Failed to delete config", "error", 4)
+		Library.Notification("Failed to delete profile", "error", 4)
 		return false
 	end
 end
@@ -3790,32 +4734,32 @@ function Library.GetAutoLoad()
 	return nil
 end
 
-function toggleHandler:Apply(value, runCallback)
-	self.Enabled = (value == true)
-
-	local t = 0.16
-	local inst = self.Instance
-	local track = inst:FindFirstChild("SwitchTrack")
-	if track then
-		local knob = track.SwitchKnob
-		local stroke = track:FindFirstChild("TrackStroke")
-		local knob_w = knob.Size.X.Offset
-		if self.Enabled then
-			tweenservice:Create(track, TweenInfo.new(t, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), { BackgroundColor3 = Theme.Accent }):Play()
-			tweenservice:Create(knob, TweenInfo.new(t, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
-				Position = UDim2.new(1, -(knob_w + 2), 0.5, 0),
-				BackgroundColor3 = Theme.BackgroundDark
-			}):Play()
-			if stroke then stroke.Color = Theme.Accent end
-		else
-			tweenservice:Create(track, TweenInfo.new(t, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), { BackgroundColor3 = Theme.Track }):Play()
-			tweenservice:Create(knob, TweenInfo.new(t, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
-				Position = UDim2.new(0, 2, 0.5, 0),
-				BackgroundColor3 = Theme.TextMuted
-			}):Play()
-			if stroke then stroke.Color = Theme.Stroke end
-		end
+local function set_toggle_visual_state(inst, enabled, animate)
+	local track = inst and inst:FindFirstChild("SwitchTrack")
+	if not track then return end
+	local knob = track:FindFirstChild("SwitchKnob")
+	local stroke = track:FindFirstChild("TrackStroke")
+	if not knob then return end
+	local knob_w = knob.Size.X.Offset
+	local targetTrackCol = enabled and Theme.Accent or Theme.Track
+	local targetKnobPos = enabled and UDim2.new(1, -(knob_w + 2), 0.5, 0) or UDim2.new(0, 2, 0.5, 0)
+	local targetKnobCol = enabled and Theme.BackgroundDark or Theme.TextMuted
+	if stroke then stroke.Color = enabled and Theme.Accent or Theme.Stroke end
+	if animate then
+		local ti = TweenInfo.new(0.16, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+		tweenservice:Create(track, ti, { BackgroundColor3 = targetTrackCol }):Play()
+		tweenservice:Create(knob, ti, { Position = targetKnobPos, BackgroundColor3 = targetKnobCol }):Play()
+	else
+		track.BackgroundColor3 = targetTrackCol
+		knob.Position = targetKnobPos
+		knob.BackgroundColor3 = targetKnobCol
 	end
+end
+
+function toggleHandler:Apply(value, runCallback)
+	restore_id()
+	self.Enabled = (value == true)
+	set_toggle_visual_state(self.Instance, self.Enabled, true)
 
 	if self.ConfigIdentifier then
 		_G.BSMTConfigData[self.ConfigIdentifier] = self.Enabled
@@ -3830,9 +4774,10 @@ function toggleHandler:Apply(value, runCallback)
 end
 
 function elementHandler:Toggle(toggleName, callback, configIdentifier)
+	restore_id()
 	local toggle = setmetatable({}, toggleHandler)
 	local toggleInstance = original_elements.Toggle:Clone()
-	local syncKey = configIdentifier or toggleName or "N/A"
+	local syncKey = resolve_sync_flag(configIdentifier, toggleName, callback) or toggleName or "N/A"
 
 	toggle.ConfigIdentifier = syncKey
 	toggle.Flag = syncKey
@@ -3853,7 +4798,7 @@ function elementHandler:Toggle(toggleName, callback, configIdentifier)
 	end
 
 	_G.BSMTConfigData[syncKey] = toggle.Enabled
-	if configIdentifier or extVal ~= nil then
+	if configIdentifier or KNOWN_G_SET[syncKey] or extVal ~= nil then
 		write_flag_val(syncKey, toggle.Enabled)
 	end
 
@@ -3866,25 +4811,24 @@ function elementHandler:Toggle(toggleName, callback, configIdentifier)
 	end)
 
 	toggleInstance.ToggleText.Text = toggleName or "N/A"
+	set_toggle_visual_state(toggleInstance, toggle.Enabled, false)
 	toggleInstance.Parent = self.ElementToParentChildren
-
-	if toggle.Enabled then
-		toggle:Apply(true, false)
-	end
 
 	task.defer(function()
 		if not toggleInstance.Parent then return end
 		local deferredVal = read_flag_val(syncKey)
 		if type(deferredVal) == "boolean" and deferredVal ~= toggle.Enabled then
-			toggle:Apply(deferredVal, false)
-		elseif toggle.Enabled then
-			toggle:Apply(true, false)
+			toggle.Enabled = deferredVal
+			_G.BSMTConfigData[syncKey] = deferredVal
+			set_toggle_visual_state(toggleInstance, deferredVal, false)
+		else
+			set_toggle_visual_state(toggleInstance, toggle.Enabled, false)
 		end
 	end)
 
 	watch_genv(syncKey, function(v)
 		if type(v) == "boolean" and v ~= toggle.Enabled then
-			toggle:Apply(v, true)
+			toggle:Apply(v, false)
 		end
 	end)
 
@@ -4017,6 +4961,34 @@ function toggleHandler:BindKey(arg, defaultKeyName)
 	})
 
 	local listenConn = nil
+	local function clear_inline_bind()
+		if listenConn then listenConn:Disconnect() listenConn = nil end
+		self._isBindingKey = false
+		keyBtn.Text = "None"
+		keyBtn.TextColor3 = Theme.TextMuted
+		ks.Color = Theme.Stroke
+		self:BindKeyCode(nil)
+		_G.BSMTConfigData[configKey] = ""
+	end
+
+	local touchHoldToken = 0
+	keyBtn.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Touch then
+			touchHoldToken += 1
+			local myToken = touchHoldToken
+			task.delay(0.45, function()
+				if touchHoldToken == myToken then
+					clear_inline_bind()
+				end
+			end)
+		end
+	end)
+	keyBtn.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.Touch then
+			touchHoldToken += 1
+		end
+	end)
+
 	keyBtn.Activated:Connect(function()
 		if self._isBindingKey then return end
 		self._isBindingKey = true
@@ -4026,14 +4998,7 @@ function toggleHandler:BindKey(arg, defaultKeyName)
 		if listenConn then listenConn:Disconnect() end
 		listenConn = uis.InputBegan:Connect(function(input)
 			if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == Enum.KeyCode.Escape then
-				listenConn:Disconnect()
-				listenConn = nil
-				keyBtn.Text = "None"
-				keyBtn.TextColor3 = Theme.TextMuted
-				ks.Color = Theme.Stroke
-				self:BindKeyCode(nil)
-				_G.BSMTConfigData[configKey] = ""
-				task.defer(function() self._isBindingKey = false end)
+				clear_inline_bind()
 				return
 			end
 			local dispName, binding = resolve_binding(input)
@@ -4049,15 +5014,7 @@ function toggleHandler:BindKey(arg, defaultKeyName)
 		end)
 	end)
 
-	keyBtn.MouseButton2Click:Connect(function()
-		if listenConn then listenConn:Disconnect() listenConn = nil end
-		self._isBindingKey = false
-		keyBtn.Text = "None"
-		keyBtn.TextColor3 = Theme.TextMuted
-		ks.Color = Theme.Stroke
-		self:BindKeyCode(nil)
-		_G.BSMTConfigData[configKey] = ""
-	end)
+	keyBtn.MouseButton2Click:Connect(clear_inline_bind)
 
 	self._inlineKeyBtn = keyBtn
 	return self
@@ -4073,39 +5030,85 @@ function windowHandler:SetKeybind(keybind)
 	self.CurrentKeybind = Enum.KeyCode.RightShift
 end
 
+local THEME_PRESETS = {
+	["Default Blue"] = {
+		Accent          = Color3.fromRGB(130, 175, 255),
+		AccentSecondary = Color3.fromRGB(90, 135, 230),
+		AccentBright    = Color3.fromRGB(175, 205, 255),
+	},
+	["Cyber Purple"] = {
+		Accent          = Color3.fromRGB(165, 115, 255),
+		AccentSecondary = Color3.fromRGB(125, 75, 225),
+		AccentBright    = Color3.fromRGB(205, 170, 255),
+	},
+	["Crimson Rage"] = {
+		Accent          = Color3.fromRGB(245, 85, 105),
+		AccentSecondary = Color3.fromRGB(200, 50, 70),
+		AccentBright    = Color3.fromRGB(255, 140, 155),
+	},
+	["Emerald Matrix"] = {
+		Accent          = Color3.fromRGB(75, 220, 145),
+		AccentSecondary = Color3.fromRGB(45, 175, 110),
+		AccentBright    = Color3.fromRGB(135, 245, 185),
+	},
+	["Amber Gold"] = {
+		Accent          = Color3.fromRGB(245, 185, 65),
+		AccentSecondary = Color3.fromRGB(205, 140, 35),
+		AccentBright    = Color3.fromRGB(255, 215, 125),
+	},
+	["Rose Quartz"] = {
+		Accent          = Color3.fromRGB(245, 120, 190),
+		AccentSecondary = Color3.fromRGB(205, 80, 150),
+		AccentBright    = Color3.fromRGB(255, 175, 220),
+	},
+}
+
 function windowHandler:ConfigTab()
+	restore_id()
 	local configTab = self:Tab("Configurations", "rbxassetid://11295279671")
 	local leftSec = configTab:Section("Profile Manager", "left")
-	local rightSec = configTab:Section("Interface & Settings", "right")
+	local rightSec = configTab:Section("Interface & HUD", "right")
 
-	local currentConfigName = "default"
+	local currentConfigName = Library.GetAutoLoad() or "default"
 	local refresh_profiles
+
+	local statusLabel = leftSec:Label("Profile: default | Auto-Load: Off | Saved: 0", 12, Theme.AccentBright)
 
 	local nameBox = leftSec:TextBox("Profile Name", function(text)
 		if text and text ~= "" then
-			currentConfigName = text
+			currentConfigName = text:gsub("^%s+", ""):gsub("%s+$", "")
 		end
 	end)
 
-	local profileDropdown = leftSec:Dropdown("Saved Profiles", {}, function(selected)
+	local profileDropdown = leftSec:Dropdown("Saved Profiles: None", {}, function(selected)
 		local cleanName = tostring(selected):gsub(" %[Auto%]$", "")
-		currentConfigName = cleanName
-		nameBox:SetText(cleanName, false)
+		if cleanName ~= "" and cleanName ~= "No profiles found" then
+			currentConfigName = cleanName
+			nameBox:SetText(cleanName, false)
+		end
 	end)
 
 	refresh_profiles = function()
+		restore_id()
 		local list = Library.GetConfigs()
-		profileDropdown:SetOptions(list)
 		local auto = Library.GetAutoLoad()
+		local displayList = {}
+		for _, nm in ipairs(list) do
+			table.insert(displayList, nm .. (auto == nm and " [Auto]" or ""))
+		end
+		profileDropdown:SetOptions(displayList)
 		if #list == 0 then
-			profileDropdown:ChangeText("No profiles found")
+			profileDropdown:ChangeText("Saved Profiles: None")
 		elseif currentConfigName and table.find(list, currentConfigName) then
-			profileDropdown:ChangeText(currentConfigName .. (auto == currentConfigName and " [Auto]" or ""))
+			profileDropdown:ChangeText("Saved Profiles: " .. currentConfigName .. (auto == currentConfigName and " [Auto]" or ""))
 		else
 			currentConfigName = list[1]
 			nameBox:SetText(currentConfigName, false)
-			profileDropdown:ChangeText(currentConfigName .. (auto == currentConfigName and " [Auto]" or ""))
+			profileDropdown:ChangeText("Saved Profiles: " .. currentConfigName .. (auto == currentConfigName and " [Auto]" or ""))
 		end
+		local activeStr = Library._activeProfileName or currentConfigName or "default"
+		local autoStr = (auto and auto ~= "") and auto or "Off"
+		statusLabel:ChangeText(string.format("Active: %s | Auto: %s | Saved: %d", activeStr, autoStr, #list))
 	end
 
 	leftSec:Button("Save / Overwrite Profile", function()
@@ -4118,7 +5121,9 @@ function windowHandler:ConfigTab()
 
 	leftSec:Button("Load Selected Profile", function()
 		if currentConfigName and currentConfigName ~= "" then
-			Library.LoadConfig(currentConfigName)
+			if Library.LoadConfig(currentConfigName) then
+				refresh_profiles()
+			end
 		else
 			Library.Notification("Select or enter a profile name", "warning", 3)
 		end
@@ -4134,9 +5139,14 @@ function windowHandler:ConfigTab()
 
 	leftSec:Button("Refresh Profile List", function()
 		refresh_profiles()
+		Library.Notification("Profile list refreshed", "info", 2)
 	end)
 
-	leftSec:Title("Clipboard Sync")
+	leftSec:Button("Reset All Settings to Default", function()
+		Library.ResetConfig()
+	end)
+
+	leftSec:Title("Clipboard & JSON Sync")
 
 	leftSec:Button("Export Config to Clipboard", function()
 		local clip = setclipboard or toclipboard
@@ -4146,6 +5156,20 @@ function windowHandler:ConfigTab()
 		end
 		clip(Library.ExportConfig())
 		Library.Notification("Config JSON copied to clipboard!", "success", 3)
+	end)
+
+	leftSec:Button("Import Config from Clipboard", function()
+		local getclip = getclipboard or fromclipboard
+		if not getclip then
+			Library.Notification("Paste JSON in the Import JSON box below", "warning", 3)
+			return
+		end
+		local ok, str = pcall(getclip)
+		if ok and type(str) == "string" and str ~= "" then
+			Library.ImportConfig(str)
+		else
+			Library.Notification("Clipboard is empty or unreadable", "warning", 3)
+		end
 	end)
 
 	leftSec:TextBox("Import JSON", function(jsonText)
@@ -4181,6 +5205,60 @@ function windowHandler:ConfigTab()
 	end, "watermark_enabled")
 	local wmInitial = _G.BSMTConfigData["watermark_enabled"]
 	wmToggle:Set(wmInitial == nil and true or wmInitial)
+
+	local wmPosDrop = rightSec:Dropdown("Watermark Pos: Top Left", { "Top Left", "Top Center", "Top Right", "Bottom Left", "Bottom Right" }, function(pos)
+		if Library.Watermark and Library.Watermark.SetPositionPreset then
+			Library.Watermark.SetPositionPreset(pos)
+		end
+	end, "watermark_position")
+	if _G.BSMTConfigData["watermark_position"] then
+		wmPosDrop:Set(_G.BSMTConfigData["watermark_position"], true)
+	end
+
+	local notifPosDrop = rightSec:Dropdown("Notifications: Top Right", { "Top Right", "Bottom Right", "Top Left", "Bottom Left" }, function(pos)
+		Library.SetNotificationPosition(pos)
+	end, "notif_position")
+	if _G.BSMTConfigData["notif_position"] then
+		notifPosDrop:Set(_G.BSMTConfigData["notif_position"], true)
+	end
+
+	local mobBtnToggle = rightSec:Toggle("Floating Mobile Button", function(enabled)
+		if enabled then
+			self:CreateMobileButton(nil, true)
+			self:ShowMobileButton()
+		else
+			self:HideMobileButton()
+		end
+	end, "mobile_button_enabled")
+	mobBtnToggle:Set(self.MobileButton ~= nil and self.MobileButton.Visible == true)
+
+	rightSec:Dropdown("Window Size: Default", { "Compact (540x360)", "Default (660x440)", "Large (760x500)", "Reset Size" }, function(preset)
+		if preset:find("Compact") then
+			self:SetSize(540, 360, true)
+		elseif preset:find("Large") then
+			self:SetSize(760, 500, true)
+		elseif preset:find("Default") then
+			self:SetSize(660, 440, true)
+		else
+			self:ResetSize()
+		end
+	end)
+
+	rightSec:Dropdown("Theme: Default Blue", { "Default Blue", "Cyber Purple", "Crimson Rage", "Emerald Matrix", "Amber Gold", "Rose Quartz" }, function(themeName)
+		local p = THEME_PRESETS[themeName]
+		if p then
+			Library.SetTheme(p)
+		end
+	end, "ui_theme_preset")
+
+	rightSec:ColorWheel("UI Accent Color", function(c)
+		local h, s, v = c:ToHSV()
+		Library.SetTheme({
+			Accent = c,
+			AccentSecondary = Color3.fromHSV(h, math.clamp(s * 1.05, 0, 1), math.clamp(v * 0.82, 0, 1)),
+			AccentBright = Color3.fromHSV(h, math.clamp(s * 0.65, 0, 1), math.clamp(v * 1.12, 0, 1)),
+		})
+	end, "ui_accent_color")
 
 	do
 		local keybindRow = original_elements.Keybind:Clone()
@@ -4225,8 +5303,8 @@ function windowHandler:ConfigTab()
 		end)
 	end
 
-	rightSec:Title("Session")
-	local uptimeLabel = rightSec:Label("Uptime: 00:00")
+	rightSec:Title("Session Telemetry")
+	local uptimeLabel = rightSec:Label("Uptime: 00:00 | Active Toggles: 0")
 
 	do
 		local ok, uptimeText = pcall(function()
@@ -4241,7 +5319,12 @@ function windowHandler:ConfigTab()
 				local h = math.floor(secs / 3600)
 				local m = math.floor((secs % 3600) / 60)
 				local s = secs % 60
-				local str = h > 0 and string.format("Uptime: %d:%02d:%02d", h, m, s) or string.format("Uptime: %02d:%02d", m, s)
+				local activeCnt = 0
+				for _, k in ipairs(KNOWN_G_KEYS) do
+					if read_flag_val(k) == true then activeCnt += 1 end
+				end
+				local up = h > 0 and string.format("%d:%02d:%02d", h, m, s) or string.format("%02d:%02d", m, s)
+				local str = string.format("Uptime: %s | Active Toggles: %d", up, activeCnt)
 				if str ~= lastStr then
 					lastStr = str
 					uptimeText.Text = str
@@ -4263,6 +5346,9 @@ end)
 
 function windowHandler:CreateMobileButton(imageId, forceCreate)
 	if self.MobileButtonGui and self.MobileButtonGui.Parent then
+		if imageId and self.MobileButton then
+			self.MobileButton.Image = imageId
+		end
 		return self.MobileButton
 	end
 	if not forceCreate and not is_mobile then
@@ -4278,12 +5364,13 @@ function windowHandler:CreateMobileButton(imageId, forceCreate)
 	ToggleGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	ToggleGui.IgnoreGuiInset = true
 	ToggleGui.ResetOnSpawn = false
+	ToggleGui.DisplayOrder = 997
 	parent_protected(ToggleGui)
 
 	Toggle.Name = "Toggle"
 	Toggle.Parent = ToggleGui
 	Toggle.BackgroundColor3 = Theme.Background
-	Toggle.BackgroundTransparency = 0.1
+	Toggle.BackgroundTransparency = 0.08
 	Toggle.Position = UDim2.fromOffset(20, math.round(cam.ViewportSize.Y * 0.4))
 	Toggle.Size = UDim2.fromOffset(48, 48)
 	Toggle.Image = imageId or "rbxassetid://10746039695"
@@ -4292,11 +5379,12 @@ function windowHandler:CreateMobileButton(imageId, forceCreate)
 	Toggle.AutoButtonColor = false
 	Toggle.Visible = true
 
-	UICorner.CornerRadius = UDim.new(0, 10)
+	UICorner.CornerRadius = UDim.new(0, 12)
 	UICorner.Parent = Toggle
 
-	UIStroke.Color = Theme.Stroke
-	UIStroke.Thickness = 1
+	UIStroke.Color = Theme.Accent
+	UIStroke.Transparency = 0.35
+	UIStroke.Thickness = 1.5
 	UIStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	UIStroke.Parent = Toggle
 
@@ -4338,6 +5426,7 @@ function windowHandler:CreateMobileButton(imageId, forceCreate)
 				local bg = self.Instance:FindFirstChild("Background")
 				if bg then
 					bg.Visible = not bg.Visible
+					UIStroke.Color = bg.Visible and Theme.Accent or Theme.Stroke
 					local shrink = tweenservice:Create(Toggle, TweenInfo.new(0.12, Enum.EasingStyle.Quad), { Size = UDim2.fromOffset(42, 42) })
 					local grow = tweenservice:Create(Toggle, TweenInfo.new(0.15, Enum.EasingStyle.Quad), { Size = UDim2.fromOffset(48, 48) })
 					shrink:Play()
@@ -4388,14 +5477,14 @@ function windowHandler:RemoveMobileButton()
 end
 
 function windowHandler:AutoMobileButton(imageId)
-	if is_mobile then
-		self:CreateMobileButton(imageId, false)
+	if is_mobile or uis.TouchEnabled then
+		self:CreateMobileButton(imageId, true)
 	end
 	return is_mobile
 end
 
-_G.Notify = function(message, notifType, duration)
-	return Library.Notification(message, notifType, duration)
+_G.Notify = function(message, notifType, duration, customTitle)
+	return Library.Notification(message, notifType, duration, customTitle)
 end
 
 _G.BSMTSettings = Library.Settings
@@ -4414,15 +5503,16 @@ do
 	shell.Name = "Shell"
 	shell.Parent = screenGui
 	shell.AnchorPoint = Vector2.new(0, 0)
-	shell.Position = UDim2.new(0, 12, 0, 12)
-	shell.Size = UDim2.new(0, 10, 0, 26)
+	shell.Position = UDim2.fromOffset(14, 14)
+	shell.Size = UDim2.new(0, 10, 0, 30)
 	shell.AutomaticSize = Enum.AutomaticSize.X
 	shell.BackgroundColor3 = Theme.Background
-	shell.BackgroundTransparency = 0.08
+	shell.BackgroundTransparency = 0.05
 	shell.BorderSizePixel = 0
+	shell.Active = true
 
 	local shellCorner = Instance.new("UICorner")
-	shellCorner.CornerRadius = UDim.new(0, 6)
+	shellCorner.CornerRadius = UDim.new(0, 8)
 	shellCorner.Parent = shell
 
 	local shellStroke = Instance.new("UIStroke")
@@ -4431,82 +5521,159 @@ do
 	shellStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	shellStroke.Parent = shell
 
-	local accentBar = Instance.new("Frame")
-	accentBar.Name = "AccentBar"
-	accentBar.Parent = shell
-	accentBar.AnchorPoint = Vector2.new(0, 0.5)
-	accentBar.Position = UDim2.new(0, 0, 0.5, 0)
-	accentBar.Size = UDim2.new(0, 2, 0.6, 0)
-	accentBar.BackgroundColor3 = Theme.Accent
-	accentBar.BorderSizePixel = 0
-	accentBar.ZIndex = 2
-	local accentCorner = Instance.new("UICorner")
-	accentCorner.CornerRadius = UDim.new(1, 0)
-	accentCorner.Parent = accentBar
+	local topLine = Instance.new("Frame")
+	topLine.Name = "TopAccentLine"
+	topLine.Parent = shell
+	topLine.AnchorPoint = Vector2.new(0.5, 0)
+	topLine.Position = UDim2.new(0.5, 0, 0, 0)
+	topLine.Size = UDim2.new(1, -12, 0, 2)
+	topLine.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	topLine.BorderSizePixel = 0
+	topLine.ZIndex = 4
+
+	local topLineCorner = Instance.new("UICorner")
+	topLineCorner.CornerRadius = UDim.new(1, 0)
+	topLineCorner.Parent = topLine
+
+	local topLineGrad = Instance.new("UIGradient")
+	topLineGrad.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0.0, Theme.AccentSecondary),
+		ColorSequenceKeypoint.new(0.5, Theme.AccentBright),
+		ColorSequenceKeypoint.new(1.0, Theme.Accent),
+	})
+	topLineGrad.Parent = topLine
+
+	local rowHolder = Instance.new("Frame")
+	rowHolder.Name = "RowHolder"
+	rowHolder.Parent = shell
+	rowHolder.BackgroundTransparency = 1
+	rowHolder.Size = UDim2.new(0, 0, 1, 0)
+	rowHolder.AutomaticSize = Enum.AutomaticSize.X
 
 	local layout = Instance.new("UIListLayout")
-	layout.Parent = shell
+	layout.Parent = rowHolder
 	layout.FillDirection = Enum.FillDirection.Horizontal
 	layout.VerticalAlignment = Enum.VerticalAlignment.Center
 	layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-	layout.Padding = UDim.new(0, 0)
+	layout.Padding = UDim.new(0, 6)
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
 
-	local shellPadding = Instance.new("UIPadding")
-	shellPadding.PaddingLeft = UDim.new(0, 10)
-	shellPadding.PaddingRight = UDim.new(0, 10)
-	shellPadding.Parent = shell
+	local rowPadding = Instance.new("UIPadding")
+	rowPadding.PaddingLeft = UDim.new(0, 10)
+	rowPadding.PaddingRight = UDim.new(0, 10)
+	rowPadding.PaddingTop = UDim.new(0, 2)
+	rowPadding.Parent = rowHolder
 
-	local function make_seg(text, color, order, bold)
+	local function make_chip(order, withDot)
+		local chip = Instance.new("Frame")
+		chip.Name = "Chip" .. order
+		chip.Parent = rowHolder
+		chip.BackgroundColor3 = Theme.Element
+		chip.BackgroundTransparency = 0.25
+		chip.BorderSizePixel = 0
+		chip.Size = UDim2.new(0, 0, 0, 20)
+		chip.AutomaticSize = Enum.AutomaticSize.X
+		chip.LayoutOrder = order
+
+		local cc = Instance.new("UICorner")
+		cc.CornerRadius = UDim.new(0, 5)
+		cc.Parent = chip
+
+		local cl = Instance.new("UIListLayout")
+		cl.Parent = chip
+		cl.FillDirection = Enum.FillDirection.Horizontal
+		cl.VerticalAlignment = Enum.VerticalAlignment.Center
+		cl.Padding = UDim.new(0, 5)
+		cl.SortOrder = Enum.SortOrder.LayoutOrder
+
+		local cp = Instance.new("UIPadding")
+		cp.PaddingLeft = UDim.new(0, 7)
+		cp.PaddingRight = UDim.new(0, 7)
+		cp.Parent = chip
+
+		local dot
+		if withDot then
+			dot = Instance.new("Frame")
+			dot.Name = "Dot"
+			dot.Parent = chip
+			dot.Size = UDim2.fromOffset(6, 6)
+			dot.BackgroundColor3 = Theme.Accent
+			dot.BorderSizePixel = 0
+			dot.LayoutOrder = 1
+			local dc = Instance.new("UICorner")
+			dc.CornerRadius = UDim.new(1, 0)
+			dc.Parent = dot
+		end
+
 		local lbl = Instance.new("TextLabel")
-		lbl.Name = "Seg" .. order
-		lbl.Parent = shell
+		lbl.Name = "Value"
+		lbl.Parent = chip
 		lbl.BackgroundTransparency = 1
 		lbl.AutomaticSize = Enum.AutomaticSize.X
 		lbl.Size = UDim2.new(0, 0, 1, 0)
-		lbl.Font = bold and Enum.Font.GothamBold or Enum.Font.Gotham
-		lbl.Text = text
-		lbl.TextColor3 = color
-		lbl.TextSize = 12
-		lbl.LayoutOrder = order
-		return lbl
+		lbl.Font = Enum.Font.GothamMedium
+		lbl.Text = "--"
+		lbl.TextColor3 = Theme.Text
+		lbl.TextSize = 11
+		lbl.LayoutOrder = 2
+
+		return chip, lbl, dot
 	end
 
-	local function make_div(order)
-		local d = Instance.new("TextLabel")
-		d.Name = "Div" .. order
-		d.Parent = shell
-		d.BackgroundTransparency = 1
-		d.Size = UDim2.new(0, 14, 1, 0)
-		d.Font = Enum.Font.Gotham
-		d.Text = "│"
-		d.TextColor3 = Theme.Stroke
-		d.TextSize = 12
-		d.TextXAlignment = Enum.TextXAlignment.Center
-		d.LayoutOrder = order
-		return d
-	end
+	local brandChip = Instance.new("Frame")
+	brandChip.Name = "BrandChip"
+	brandChip.Parent = rowHolder
+	brandChip.BackgroundTransparency = 1
+	brandChip.Size = UDim2.new(0, 0, 0, 20)
+	brandChip.AutomaticSize = Enum.AutomaticSize.X
+	brandChip.LayoutOrder = 1
 
-	make_seg("BSMT", Theme.TextBright, 1, true)
-	make_div(2)
-	local lblFps = make_seg("--", Theme.Text, 3, true)
-	make_seg(" fps", Theme.TextDim, 4, false)
-	make_div(5)
-	local lblPing = make_seg("--", Theme.Text, 6, true)
-	make_seg(" ms", Theme.TextDim, 7, false)
-	make_div(8)
-	local lblUptime = make_seg("00:00", Theme.TextMuted, 9, false)
+	local brandLayout = Instance.new("UIListLayout")
+	brandLayout.Parent = brandChip
+	brandLayout.FillDirection = Enum.FillDirection.Horizontal
+	brandLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	brandLayout.Padding = UDim.new(0, 6)
+	brandLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+	local brandIcon = Instance.new("ImageLabel")
+	brandIcon.Name = "BrandIcon"
+	brandIcon.Parent = brandChip
+	brandIcon.BackgroundTransparency = 1
+	brandIcon.Size = UDim2.fromOffset(14, 14)
+	brandIcon.Image = "rbxassetid://10746039695"
+	brandIcon.ImageColor3 = Theme.Accent
+	brandIcon.LayoutOrder = 1
+
+	local lblBrand = Instance.new("TextLabel")
+	lblBrand.Name = "BrandText"
+	lblBrand.Parent = brandChip
+	lblBrand.BackgroundTransparency = 1
+	lblBrand.AutomaticSize = Enum.AutomaticSize.X
+	lblBrand.Size = UDim2.new(0, 0, 1, 0)
+	lblBrand.Font = Enum.Font.GothamBold
+	lblBrand.Text = "BSMT"
+	lblBrand.TextColor3 = Theme.TextBright
+	lblBrand.TextSize = 12
+	lblBrand.LayoutOrder = 2
+
+	local _, lblFps, dotFps = make_chip(2, true)
+	local _, lblPing, dotPing = make_chip(3, true)
+	local _, lblActive, dotActive = make_chip(4, true)
+	local _, lblUptime = make_chip(5, false)
+
+	lblActive.Text = "0 ON"
+	dotActive.BackgroundColor3 = Theme.Accent
 
 	local function fps_color(v)
-		if v >= 55 then return Color3.fromRGB(75, 210, 130)
-		elseif v >= 30 then return Color3.fromRGB(240, 185, 65)
-		else return Color3.fromRGB(235, 80, 80) end
+		if v >= 55 then return Color3.fromRGB(75, 215, 135)
+		elseif v >= 30 then return Color3.fromRGB(245, 190, 65)
+		else return Color3.fromRGB(240, 82, 82) end
 	end
 
 	local function ping_color(v)
-		if v <= 80 then return Color3.fromRGB(75, 210, 130)
-		elseif v <= 150 then return Color3.fromRGB(240, 185, 65)
-		else return Color3.fromRGB(235, 80, 80) end
+		if v <= 80 then return Color3.fromRGB(75, 215, 135)
+		elseif v <= 150 then return Color3.fromRGB(245, 190, 65)
+		else return Color3.fromRGB(240, 82, 82) end
 	end
 
 	local function format_uptime(secs)
@@ -4515,6 +5682,67 @@ do
 		local m = math.floor((s % 3600) / 60)
 		local sec = s % 60
 		return h > 0 and string.format("%d:%02d:%02d", h, m, sec) or string.format("%02d:%02d", m, sec)
+	end
+
+	local wmDragging = false
+	local wmDragInput = nil
+	local wmDragStart = nil
+	local wmStartPos = nil
+
+	shell.InputBegan:Connect(function(input)
+		if is_primary_input(input) then
+			wmDragging = true
+			wmDragInput = input
+			wmDragStart = Vector2.new(input.Position.X, input.Position.Y)
+			wmStartPos = Vector2.new(shell.AbsolutePosition.X, shell.AbsolutePosition.Y)
+			shell.AnchorPoint = Vector2.new(0, 0)
+			shell.Position = UDim2.fromOffset(wmStartPos.X, wmStartPos.Y)
+		end
+	end)
+
+	shell.InputChanged:Connect(function(input)
+		if is_move_input(input) then
+			wmDragInput = input
+		end
+	end)
+
+	track_conn(uis.InputChanged:Connect(function(input)
+		if wmDragging and (input == wmDragInput or input.UserInputType == Enum.UserInputType.Touch) then
+			local delta = Vector2.new(input.Position.X, input.Position.Y) - wmDragStart
+			local vp = cam.ViewportSize
+			local sz = shell.AbsoluteSize
+			local nx = math.clamp(wmStartPos.X + delta.X, 6, math.max(6, vp.X - sz.X - 6))
+			local ny = math.clamp(wmStartPos.Y + delta.Y, 6, math.max(6, vp.Y - sz.Y - 6))
+			shell.Position = UDim2.fromOffset(math.round(nx), math.round(ny))
+		end
+	end))
+
+	track_conn(uis.InputEnded:Connect(function(input)
+		if is_primary_input(input) then
+			wmDragging = false
+			wmDragInput = nil
+		end
+	end))
+
+	local function apply_wm_preset(presetName)
+		local p = tostring(presetName or "Top Left")
+		_G.BSMTConfigData["watermark_position"] = p
+		if p == "Top Center" then
+			shell.AnchorPoint = Vector2.new(0.5, 0)
+			shell.Position = UDim2.new(0.5, 0, 0, 12)
+		elseif p == "Top Right" then
+			shell.AnchorPoint = Vector2.new(1, 0)
+			shell.Position = UDim2.new(1, -14, 0, 12)
+		elseif p == "Bottom Left" then
+			shell.AnchorPoint = Vector2.new(0, 1)
+			shell.Position = UDim2.new(0, 14, 1, -12)
+		elseif p == "Bottom Right" then
+			shell.AnchorPoint = Vector2.new(1, 1)
+			shell.Position = UDim2.new(1, -14, 1, -12)
+		else
+			shell.AnchorPoint = Vector2.new(0, 0)
+			shell.Position = UDim2.new(0, 14, 0, 12)
+		end
 	end
 
 	local wmConn
@@ -4527,24 +5755,45 @@ do
 	local function update_watermark(dt)
 		local now = tick()
 		frameCount += 1
-		if now - lastFpsTime >= 0.5 then
+		if now - lastFpsTime >= 0.45 then
 			local fps = math.round(frameCount / (now - lastFpsTime))
 			frameCount = 0
 			lastFpsTime = now
-			lblFps.Text = tostring(fps)
-			lblFps.TextColor3 = fps_color(fps)
+			if read_flag_val("fps_spoof") == true then
+				local baseFps = tonumber(read_flag_val("fps_val")) or 240
+				local jit = tonumber(read_flag_val("fps_jitter")) or 0
+				fps = math.max(1, baseFps + (jit > 0 and math.random(-jit, jit) or 0))
+			end
+			local col = fps_color(fps)
+			lblFps.Text = tostring(fps) .. " FPS"
+			dotFps.BackgroundColor3 = col
 		end
 
 		pingTimer += dt
-		if pingTimer >= 1 then
+		if pingTimer >= 0.8 then
 			pingTimer = 0
-			local ok, ping = pcall(function()
-				return math.round(stats.Network.ServerStatsItem["Data Ping"]:GetValue())
-			end)
-			if ok then
-				lblPing.Text = tostring(ping)
-				lblPing.TextColor3 = ping_color(ping)
+			local ping = 0
+			if read_flag_val("ping_spoof") == true then
+				local basePing = tonumber(read_flag_val("ping_val")) or 18
+				local jit = tonumber(read_flag_val("ping_jitter")) or 0
+				ping = math.max(1, basePing + (jit > 0 and math.random(-jit, jit) or 0))
+			else
+				local ok, rawPing = pcall(function()
+					return math.round(stats.Network.ServerStatsItem["Data Ping"]:GetValue())
+				end)
+				if ok and rawPing then ping = rawPing end
 			end
+			local pcol = ping_color(ping)
+			lblPing.Text = tostring(ping) .. " ms"
+			dotPing.BackgroundColor3 = pcol
+
+			local activeCnt = 0
+			for _, k in ipairs(KNOWN_G_KEYS) do
+				if read_flag_val(k) == true then activeCnt += 1 end
+			end
+			lblActive.Text = tostring(activeCnt) .. " ON"
+			dotActive.BackgroundColor3 = activeCnt > 0 and Theme.Accent or Theme.TextDim
+
 			local uptimeStr = format_uptime(now - scriptStartTime)
 			if uptimeStr ~= lastUptimeStr then
 				lastUptimeStr = uptimeStr
@@ -4575,6 +5824,12 @@ do
 	Library.Watermark = {
 		SetVisible = set_watermark_visible,
 		IsVisible = function() return wmVisible end,
+		SetTitle = function(titleStr)
+			if titleStr and titleStr ~= "" then
+				lblBrand.Text = tostring(titleStr)
+			end
+		end,
+		SetPositionPreset = apply_wm_preset,
 	}
 	Library._scriptStartTime = scriptStartTime
 
@@ -4586,6 +5841,9 @@ do
 	})
 	if _G.BSMTConfigData["watermark_enabled"] ~= nil then
 		set_watermark_visible(_G.BSMTConfigData["watermark_enabled"])
+	end
+	if _G.BSMTConfigData["watermark_position"] then
+		apply_wm_preset(_G.BSMTConfigData["watermark_position"])
 	end
 end
 
@@ -4649,8 +5907,10 @@ function Library.Unload()
 	if Library.Watermark then pcall(Library.Watermark.SetVisible, false) end
 	library_alive = false
 	table.clear(slow_tick_listeners)
+	table.clear(window_resize_listeners)
 	table.clear(genv_watchers)
 	table.clear(keybind_registry)
+	if _G.BSMTConfigElements then table.clear(_G.BSMTConfigElements) end
 	keybind_dispatch = nil
 
 	for conn in pairs(live_connections) do
