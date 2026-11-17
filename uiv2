@@ -88,242 +88,8 @@ local function on_slow_tick(fn)
 	return fn
 end
 
-local KNOWN_G_KEYS = {
-	"rage_enabled", "rage_autoshoot", "rage_autoreload", "rage_reload_at",
-	"rage_autostop", "rage_stopmode", "rage_autocrouch", "rage_autoscope",
-	"rage_autowall", "rage_minpen", "rage_maxwalls", "rage_mindmg",
-	"rage_ovr_active", "rage_ovr_dmg", "rage_baim_hp", "rage_baim_air",
-	"rage_resolver", "rage_doubletap", "rage_multipoint", "rage_mpscale",
-	"rage_predict", "pred_mode", "pred_lead_ms", "rage_fov",
-	"rage_hitchance", "rage_prio", "rage_part", "rage_maxdist",
-	"rage_zombies", "rage_bots", "rage_airshoot", "rage_ratemode",
-	"rage_delayms", "killfeed_scope", "autopeek", "buybot",
-	"buy_primary", "buy_secondary", "buy_armor", "buy_kit", "buy_nade",
-	"sa_enabled", "sa_hitchance", "sa_hschance", "sa_fov", "sa_drawfov",
-	"sa_fovsize", "sa_wallcheck", "sa_autowall", "sa_minpen",
-	"sa_multipoint", "sa_mpscale", "sa_predict", "sa_onlyaim",
-	"sa_part", "sa_prio", "sa_maxdist", "sa_zombies", "sa_bots",
-	"aim_enabled", "aim_always", "aim_keymode", "aim_curve",
-	"aim_smooth", "aim_fov", "aim_deadzone", "aim_wallcheck",
-	"aim_smokecheck", "aim_flashcheck", "aim_part", "aim_rcs",
-	"aim_rcs_x", "aim_rcs_y",
-	"tb_enabled", "tb_delay", "tb_maxdelay", "tb_hitchance", "tb_headonly",
-	"no_spread", "no_recoil", "rapid_fire", "rapid_mult", "auto_pistol",
-	"bhop", "bhop_always", "bhop_airduck", "bhop_recover",
-	"bhop_launch_wait", "bhop_min_stam", "edge_jump", "slow_walk",
-	"slow_walk_pct", "speed_hud", "strafe_mode", "strafe_gain",
-	"aa_enabled", "aa_yawbase", "aa_yawmode", "aa_spin", "aa_jitter",
-	"aa_offset", "aa_pitch", "aa_duckmode", "aa_shotflip", "aa_tp_visual",
-	"fakelag", "fakelag_ticks", "fakelag_adaptive",
-	"esp_enabled", "esp_teamcheck", "esp_zombies", "esp_dormant",
-	"esp_box", "esp_healthbar", "esp_name", "esp_health", "esp_armor",
-	"esp_weapon", "esp_dist", "esp_tracer", "esp_looking", "esp_chams",
-	"esp_color", "esp_zcolor", "esp_dcolor", "esp_drops", "esp_c4",
-	"esp_sound", "esp_sound_time", "speclist",
-	"fov_enabled", "fov_val", "third_person", "tp_dist",
-	"no_flash", "no_smoke", "no_shake",
-	"fps_boost", "fps_spoof", "fps_val", "fps_jitter",
-	"ping_spoof", "ping_val", "ping_jitter",
-	"knifebot", "knife_sa", "knife_heavy", "knife_zombies",
-	"hitmarker", "hitsound", "hitsound_type", "hitsound_vol",
-	"bullet_tracers", "tracer_color", "tracer_life", "esp_nades",
-	"no_bob", "potato_mode", "night_mode", "fullbright",
-	"wb_highlight", "wb_probe", "wb_tracers", "wb_tracer_enemy",
-	"wb_threat", "hitlogs", "killsay", "killsay_mode", "nade_helper",
-	"gun_changer", "gun_sel", "gun_skin", "gun_float",
-	"gun_stattrak", "gun_stat_val", "gun_skins",
-	"knife_changer", "knife_model", "knife_skin", "knife_float",
-	"knife_stattrak", "knife_stat_val",
-	"glove_changer", "glove_model", "glove_skin", "glove_float",
-	"auto_candy", "auto_revive",
-}
-
-local KNOWN_G_SET = {}
-for _, k in ipairs(KNOWN_G_KEYS) do KNOWN_G_SET[k] = true end
-
-local COLOR_G_KEYS = {
-	esp_color = true,
-	esp_zcolor = true,
-	esp_dcolor = true,
-	tracer_color = true,
-}
-
-local DROPDOWN_PREFIX_MAP = {
-	["stop mode"] = "rage_stopmode",
-	["pred mode"] = "pred_mode",
-	["hitbox"] = "rage_part",
-	["priority"] = "rage_prio",
-	["fire rate"] = "rage_ratemode",
-	["killfeed scope"] = "killfeed_scope",
-	["primary"] = "buy_primary",
-	["secondary"] = "buy_secondary",
-	["armor"] = "buy_armor",
-	["nade"] = "buy_nade",
-	["target part"] = "sa_part",
-	["sa priority"] = "sa_prio",
-	["aim key"] = "aim_keymode",
-	["aim curve"] = "aim_curve",
-	["strafe"] = "strafe_mode",
-	["yaw base"] = "aa_yawbase",
-	["yaw mode"] = "aa_yawmode",
-	["pitch"] = "aa_pitch",
-	["duck aa"] = "aa_duckmode",
-	["killsay style"] = "killsay_mode",
-	["hitsound"] = "hitsound_type",
-	["gun"] = "gun_sel",
-	["knife"] = "knife_model",
-	["gloves"] = "glove_model",
-}
-
-local LABEL_FLAG_MAP = {
-	["enable ragebot"] = "rage_enabled",
-	["auto shoot"] = "rage_autoshoot",
-	["doubletap burst (hvh)"] = "rage_doubletap",
-	["auto reload"] = "rage_autoreload",
-	["reload at rounds <="] = "rage_reload_at",
-	["auto stop"] = "rage_autostop",
-	["auto crouch on shot"] = "rage_autocrouch",
-	["auto scope (snipers)"] = "rage_autoscope",
-	["allow air shoot"] = "rage_airshoot",
-	["min damage (0 = off)"] = "rage_mindmg",
-	["min dmg override"] = "rage_ovr_active",
-	["override damage"] = "rage_ovr_dmg",
-	["force baim hp <="] = "rage_baim_hp",
-	["force baim in air"] = "rage_baim_air",
-	["anti-aim resolver"] = "rage_resolver",
-	["auto-peek (return on shot)"] = "autopeek",
-	["rage fov (deg, 360 = all)"] = "rage_fov",
-	["rage hitchance %"] = "rage_hitchance",
-	["multipoint hitscan"] = "rage_multipoint",
-	["velocity prediction"] = "rage_predict",
-	["manual lead (ms)"] = "pred_lead_ms",
-	["custom fire delay (ms)"] = "rage_delayms",
-	["rapid fire (all modes)"] = "rapid_fire",
-	["rapid fire mult"] = "rapid_mult",
-	["auto pistol (full-auto)"] = "auto_pistol",
-	["min gun pen (0=all, x100)"] = "rage_minpen",
-	["max wallbang walls"] = "rage_maxwalls",
-	["no spread"] = "no_spread",
-	["no recoil"] = "no_recoil",
-	["enable knife bot"] = "knifebot",
-	["knife silent aim"] = "knife_sa",
-	["smart backstab / heavy"] = "knife_heavy",
-	["enable auto buy"] = "buybot",
-	["buy defuse kit (ct)"] = "buy_kit",
-	["enable silent aim"] = "sa_enabled",
-	["hit chance %"] = "sa_hitchance",
-	["headshot chance %"] = "sa_hschance",
-	["use fov"] = "sa_fov",
-	["draw fov circle"] = "sa_drawfov",
-	["fov radius"] = "sa_fovsize",
-	["visible check"] = "sa_wallcheck",
-	["sa min pen (0=all, x100)"] = "sa_minpen",
-	["multipoint"] = "sa_multipoint",
-	["only while scoped/aiming"] = "sa_onlyaim",
-	["camera aimbot"] = "aim_enabled",
-	["always on (no key)"] = "aim_always",
-	["smoothness %"] = "aim_smooth",
-	["aimbot fov"] = "aim_fov",
-	["deadzone (px)"] = "aim_deadzone",
-	["rcs (recoil control)"] = "aim_rcs",
-	["rcs horizontal x %"] = "aim_rcs_x",
-	["rcs vertical y %"] = "aim_rcs_y",
-	["visible only"] = "aim_wallcheck",
-	["smoke check"] = "aim_smokecheck",
-	["flash check"] = "aim_flashcheck",
-	["triggerbot"] = "tb_enabled",
-	["trigger head only"] = "tb_headonly",
-	["trigger min delay (ms)"] = "tb_delay",
-	["trigger max delay (ms)"] = "tb_maxdelay",
-	["trigger hitchance %"] = "tb_hitchance",
-	["enable auto bhop"] = "bhop",
-	["always jump (no hold)"] = "bhop_always",
-	["standstill launch accel wait"] = "bhop_launch_wait",
-	["ground speed recover"] = "bhop_recover",
-	["min bhop stamina %"] = "bhop_min_stam",
-	["edge jump (ledges)"] = "edge_jump",
-	["crouch in air"] = "bhop_airduck",
-	["slow walk (silent peek)"] = "slow_walk",
-	["slow walk speed %"] = "slow_walk_pct",
-	["speed & stamina hud"] = "speed_hud",
-	["strafe gain %"] = "strafe_gain",
-	["enable anti-aim"] = "aa_enabled",
-	["spin speed"] = "aa_spin",
-	["jitter range"] = "aa_jitter",
-	["manual / base offset"] = "aa_offset",
-	["on-shot desync flip"] = "aa_shotflip",
-	["enable fake lag (choke)"] = "fakelag",
-	["fake lag ticks"] = "fakelag_ticks",
-	["adaptive lag"] = "fakelag_adaptive",
-	["enable esp"] = "esp_enabled",
-	["team check"] = "esp_teamcheck",
-	["zombie esp"] = "esp_zombies",
-	["last-seen (pvs culled)"] = "esp_dormant",
-	["sound/shot esp (wall bypass)"] = "esp_sound",
-	["box"] = "esp_box",
-	["health bar"] = "esp_healthbar",
-	["chams (highlight)"] = "esp_chams",
-	["name"] = "esp_name",
-	["health text"] = "esp_health",
-	["armor + helmet"] = "esp_armor",
-	["weapon + ammo"] = "esp_weapon",
-	["distance"] = "esp_dist",
-	["tracers"] = "esp_tracer",
-	["looking at you"] = "esp_looking",
-	["player esp color"] = "esp_color",
-	["zombie esp color"] = "esp_zcolor",
-	["last-seen color"] = "esp_dcolor",
-	["spectator list"] = "speclist",
-	["dropped weapon esp"] = "esp_drops",
-	["planted c4 timer + defuse esp"] = "esp_c4",
-	["grenade threat + fuse esp"] = "esp_nades",
-	["grenade trajectory + bounce"] = "nade_helper",
-	["fov changer"] = "fov_enabled",
-	["field of view"] = "fov_val",
-	["third person"] = "third_person",
-	["third person distance"] = "tp_dist",
-	["anti-flash"] = "no_flash",
-	["no smoke"] = "no_smoke",
-	["no explosion shake"] = "no_shake",
-	["fps boost"] = "fps_boost",
-	["fps spoof"] = "fps_spoof",
-	["fake fps"] = "fps_val",
-	["fps jitter"] = "fps_jitter",
-	["ping spoof"] = "ping_spoof",
-	["fake ping (ms)"] = "ping_val",
-	["ping jitter"] = "ping_jitter",
-	["server hitmarker (pvp/bots)"] = "hitmarker",
-	["hvh hit & kill logs"] = "hitlogs",
-	["wallbang zone highlight"] = "wb_highlight",
-	["crosshair wallbang probe"] = "wb_probe",
-	["wallbang tracer esp"] = "wb_tracers",
-	["show enemy bullet tracers"] = "wb_tracer_enemy",
-	["incoming wallbang threat alert"] = "wb_threat",
-	["killsay chat"] = "killsay",
-	["hitsound"] = "hitsound",
-	["hitsound volume %"] = "hitsound_vol",
-	["local 3d bullet tracers"] = "bullet_tracers",
-	["tracer color"] = "tracer_color",
-	["tracer duration (0.1s)"] = "tracer_life",
-	["no viewmodel bob/sway"] = "no_bob",
-	["potato map & foliage"] = "potato_mode",
-	["night mode"] = "night_mode",
-	["fullbright"] = "fullbright",
-	["auto collect candy (38m)"] = "auto_candy",
-	["auto revive downed allies"] = "auto_revive",
-	["enable weapon skins"] = "gun_changer",
-	["gun float (x0.001)"] = "gun_float",
-	["stattrak guns"] = "gun_stattrak",
-	["gun stattrak kills"] = "gun_stat_val",
-	["enable knife changer"] = "knife_changer",
-	["knife float (x0.001)"] = "knife_float",
-	["stattrak knife"] = "knife_stattrak",
-	["knife stattrak kills"] = "knife_stat_val",
-	["enable glove changer"] = "glove_changer",
-	["glove float (x0.001)"] = "glove_float",
-}
-
-local default_g_values = {}
+local synced_flags = {}
+local default_flag_values = {}
 local genv_watchers = {}
 local genv_watch_started = false
 
@@ -344,15 +110,18 @@ local function read_flag_val(flag)
 end
 
 local function capture_default_flag(flag)
-	if not flag or default_g_values[flag] ~= nil then return end
+	if not flag or flag == "" then return end
+	synced_flags[flag] = true
+	if default_flag_values[flag] ~= nil then return end
 	local v = read_flag_val(flag)
 	if v ~= nil then
-		default_g_values[flag] = type(v) == "table" and deep_copy_table(v) or v
+		default_flag_values[flag] = type(v) == "table" and deep_copy_table(v) or v
 	end
 end
 
-for _, k in ipairs(KNOWN_G_KEYS) do
-	capture_default_flag(k)
+local function is_syncable_val(v)
+	local tv = typeof(v)
+	return tv == "boolean" or tv == "number" or tv == "string" or tv == "Color3"
 end
 
 local function infer_flag_from_cb(cb)
@@ -362,8 +131,12 @@ local function infer_flag_from_cb(cb)
 	local ok, consts = pcall(gc, cb)
 	if not ok or type(consts) ~= "table" then return nil end
 	for _, c in pairs(consts) do
-		if type(c) == "string" and (KNOWN_G_SET[c] or genv[c] ~= nil) then
-			return c
+		if type(c) == "string" and c ~= "" and c ~= "G" and c ~= "_G" and c ~= "getgenv" then
+			local v = read_flag_val(c)
+			if v ~= nil and is_syncable_val(v) then
+				capture_default_flag(c)
+				return c
+			end
 		end
 	end
 	return nil
@@ -371,33 +144,18 @@ end
 
 local function resolve_sync_flag(explicit_flag, label_name, cb)
 	if explicit_flag and explicit_flag ~= "" then
-		if KNOWN_G_SET[explicit_flag] or read_flag_val(explicit_flag) ~= nil then
-			capture_default_flag(explicit_flag)
-			return explicit_flag
-		end
+		capture_default_flag(explicit_flag)
+		return explicit_flag
 	end
 	local from_cb = infer_flag_from_cb(cb)
 	if from_cb then
 		capture_default_flag(from_cb)
 		return from_cb
 	end
-	if label_name and type(label_name) == "string" then
-		local low = label_name:lower()
-		if LABEL_FLAG_MAP[low] then
-			capture_default_flag(LABEL_FLAG_MAP[low])
-			return LABEL_FLAG_MAP[low]
-		end
-		local prefix = low:match("^([^:]+):")
-		if prefix then
-			prefix = prefix:gsub("^%s+", ""):gsub("%s+$", "")
-			if DROPDOWN_PREFIX_MAP[prefix] then
-				capture_default_flag(DROPDOWN_PREFIX_MAP[prefix])
-				return DROPDOWN_PREFIX_MAP[prefix]
-			end
-		end
-	end
 	local fallback = explicit_flag or label_name
-	capture_default_flag(fallback)
+	if fallback and read_flag_val(fallback) ~= nil then
+		capture_default_flag(fallback)
+	end
 	return fallback
 end
 
@@ -3322,7 +3080,7 @@ function elementHandler:Dropdown(dropdownName, optionsOrCallback, callbackOrFlag
 		end)
 	end
 
-	if syncKey and (KNOWN_G_SET[syncKey] or flag ~= nil or read_flag_val(syncKey) ~= nil) then
+	if syncKey and (synced_flags[syncKey] or flag ~= nil or read_flag_val(syncKey) ~= nil) then
 		dropdown:_bindFlag(syncKey)
 	end
 
@@ -3407,7 +3165,7 @@ function dropdownHandler:Button(optName, callback)
 			pcall(self.Callback, optName)
 		end
 		_G.BSMTConfigData[self.ConfigIdentifier] = optName
-		if self.Flag and (KNOWN_G_SET[self.Flag] or read_flag_val(self.Flag) ~= nil) then
+		if self.Flag and (synced_flags[self.Flag] or read_flag_val(self.Flag) ~= nil) then
 			write_flag_val(self.Flag, optName)
 		end
 		self:_highlightOption(optName)
@@ -3434,7 +3192,7 @@ function dropdownHandler:Set(val, fireCallback)
 	end
 	self:_highlightOption(val)
 	_G.BSMTConfigData[self.ConfigIdentifier] = val
-	if self.Flag and (KNOWN_G_SET[self.Flag] or read_flag_val(self.Flag) ~= nil) then
+	if self.Flag and (synced_flags[self.Flag] or read_flag_val(self.Flag) ~= nil) then
 		write_flag_val(self.Flag, val)
 	end
 	if fireCallback ~= false then
@@ -3571,7 +3329,7 @@ function elementHandler:Slider(sliderName, callback, maximumValue, minimumValue,
 	sliderValue = slider._currentValue
 	lastRoundedValue = math.round(slider._currentValue)
 	_G.BSMTConfigData[syncKey] = slider._currentValue
-	if flag or KNOWN_G_SET[syncKey] or read_flag_val(syncKey) ~= nil then
+	if flag or synced_flags[syncKey] or read_flag_val(syncKey) ~= nil then
 		write_flag_val(syncKey, slider._currentValue)
 	end
 
@@ -4132,7 +3890,7 @@ do
 	local notifCornerMode = "Top Right"
 	local maxVisibleNotifs = 6
 
-	local function create_notification_container()
+	local function ensure_notif_container()
 		if notificationContainer and notificationContainer.Parent then return notificationContainer end
 		local container = Instance.new("ScreenGui")
 		container.Name = "BSMTNotifications"
@@ -4145,25 +3903,8 @@ do
 		return container
 	end
 
-	local function create_notification_card(cardW, cardH)
+	local function build_notif_frame(cardW, cardH, accentColor, titleStr, bodyStr)
 		local root = Instance.new("TextButton")
-		local pill = Instance.new("Frame")
-		local pillCorner = Instance.new("UICorner")
-		local pillStroke = Instance.new("UIStroke")
-		local accentBar = Instance.new("Frame")
-		local accentCorner = Instance.new("UICorner")
-		local iconBadge = Instance.new("Frame")
-		local iconBadgeCorner = Instance.new("UICorner")
-		local iconBadgeStroke = Instance.new("UIStroke")
-		local iconSym = Instance.new("TextLabel")
-		local closeBtn = Instance.new("TextButton")
-		local timerLbl = Instance.new("TextLabel")
-		local titleLbl = Instance.new("TextLabel")
-		local bodyLbl = Instance.new("TextLabel")
-		local progressBar = Instance.new("Frame")
-		local progressFill = Instance.new("Frame")
-		local progressCorner = Instance.new("UICorner")
-
 		root.Name = "Notification"
 		root.BackgroundTransparency = 1
 		root.BorderSizePixel = 0
@@ -4171,107 +3912,87 @@ do
 		root.Text = ""
 		root.Size = UDim2.fromOffset(cardW, cardH)
 
-		pill.Name = "Background"
-		pill.Parent = root
-		pill.BackgroundColor3 = Theme.Background
-		pill.BackgroundTransparency = 0.04
-		pill.BorderSizePixel = 0
-		pill.Size = UDim2.new(1, 0, 1, 0)
-		pill.ClipsDescendants = true
+		local outer = Instance.new("Frame")
+		outer.Name = "Outer"
+		outer.Parent = root
+		outer.BackgroundColor3 = Theme.BackgroundDark
+		outer.BorderSizePixel = 0
+		outer.Size = UDim2.new(1, 0, 1, 0)
+		outer.ClipsDescendants = true
 
-		pillCorner.CornerRadius = UDim.new(0, 8)
-		pillCorner.Parent = pill
+		local outerCorner = Instance.new("UICorner")
+		outerCorner.CornerRadius = UDim.new(0, 6)
+		outerCorner.Parent = outer
 
-		pillStroke.Color = Theme.Stroke
-		pillStroke.Thickness = 1
-		pillStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-		pillStroke.Parent = pill
+		local outerStroke = Instance.new("UIStroke")
+		outerStroke.Color = Theme.Stroke
+		outerStroke.Thickness = 1
+		outerStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		outerStroke.Parent = outer
 
-		accentBar.Name = "AccentBar"
-		accentBar.Parent = pill
-		accentBar.AnchorPoint = Vector2.new(0, 0.5)
-		accentBar.Position = UDim2.new(0, 0, 0.5, 0)
-		accentBar.Size = UDim2.new(0, 3, 1, -14)
-		accentBar.BackgroundColor3 = Theme.Accent
-		accentBar.BorderSizePixel = 0
-		accentBar.ZIndex = 3
+		local panel = Instance.new("Frame")
+		panel.Name = "Panel"
+		panel.Parent = outer
+		panel.BackgroundColor3 = Theme.Panel
+		panel.BorderSizePixel = 0
+		panel.Position = UDim2.fromOffset(1, 1)
+		panel.Size = UDim2.new(1, -2, 1, -2)
+		panel.ClipsDescendants = true
 
-		accentCorner.CornerRadius = UDim.new(1, 0)
-		accentCorner.Parent = accentBar
+		local panelCorner = Instance.new("UICorner")
+		panelCorner.CornerRadius = UDim.new(0, 5)
+		panelCorner.Parent = panel
 
-		iconBadge.Name = "IconBadge"
-		iconBadge.Parent = pill
-		iconBadge.AnchorPoint = Vector2.new(0, 0.5)
-		iconBadge.Position = UDim2.new(0, 11, 0.5, -1)
-		iconBadge.Size = UDim2.fromOffset(26, 26)
-		iconBadge.BackgroundColor3 = Theme.Element
-		iconBadge.BorderSizePixel = 0
-		iconBadge.ZIndex = 2
+		local leftBar = Instance.new("Frame")
+		leftBar.Name = "LeftBar"
+		leftBar.Parent = panel
+		leftBar.BackgroundColor3 = accentColor
+		leftBar.BorderSizePixel = 0
+		leftBar.Position = UDim2.fromOffset(0, 0)
+		leftBar.Size = UDim2.new(0, 2, 1, 0)
+		leftBar.ZIndex = 3
 
-		iconBadgeCorner.CornerRadius = UDim.new(0, 6)
-		iconBadgeCorner.Parent = iconBadge
+		local headFrame = Instance.new("Frame")
+		headFrame.Name = "Header"
+		headFrame.Parent = panel
+		headFrame.BackgroundColor3 = Theme.BackgroundDark
+		headFrame.BorderSizePixel = 0
+		headFrame.Position = UDim2.fromOffset(2, 0)
+		headFrame.Size = UDim2.new(1, -2, 0, 22)
+		headFrame.ZIndex = 2
 
-		iconBadgeStroke.Color = Theme.Stroke
-		iconBadgeStroke.Thickness = 1
-		iconBadgeStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-		iconBadgeStroke.Parent = iconBadge
+		local headSep = Instance.new("Frame")
+		headSep.Name = "Separator"
+		headSep.Parent = headFrame
+		headSep.AnchorPoint = Vector2.new(0, 1)
+		headSep.Position = UDim2.new(0, 0, 1, 0)
+		headSep.Size = UDim2.new(1, 0, 0, 1)
+		headSep.BackgroundColor3 = Theme.Stroke
+		headSep.BorderSizePixel = 0
+		headSep.ZIndex = 3
 
-		iconSym.Name = "IconSym"
-		iconSym.Parent = iconBadge
-		iconSym.BackgroundTransparency = 1
-		iconSym.Size = UDim2.new(1, 0, 1, 0)
-		iconSym.Font = Enum.Font.GothamBold
-		iconSym.Text = "i"
-		iconSym.TextColor3 = Theme.Accent
-		iconSym.TextSize = 13
-		iconSym.ZIndex = 3
-
-		closeBtn.Name = "CloseBtn"
-		closeBtn.Parent = pill
-		closeBtn.AnchorPoint = Vector2.new(1, 0)
-		closeBtn.BackgroundTransparency = 1
-		closeBtn.Position = UDim2.new(1, -6, 0, 6)
-		closeBtn.Size = UDim2.fromOffset(20, 20)
-		closeBtn.Font = Enum.Font.GothamBold
-		closeBtn.Text = "×"
-		closeBtn.TextColor3 = Theme.TextDim
-		closeBtn.TextSize = 16
-		closeBtn.AutoButtonColor = false
-		closeBtn.ZIndex = 4
-
-		timerLbl.Name = "TimerLabel"
-		timerLbl.Parent = pill
-		timerLbl.AnchorPoint = Vector2.new(1, 0)
-		timerLbl.BackgroundTransparency = 1
-		timerLbl.Position = UDim2.new(1, -28, 0, 9)
-		timerLbl.Size = UDim2.fromOffset(36, 14)
-		timerLbl.Font = Enum.Font.GothamMedium
-		timerLbl.Text = ""
-		timerLbl.TextColor3 = Theme.TextDim
-		timerLbl.TextSize = 10
-		timerLbl.TextXAlignment = Enum.TextXAlignment.Right
-		timerLbl.ZIndex = 3
-
+		local titleLbl = Instance.new("TextLabel")
 		titleLbl.Name = "TitleLabel"
-		titleLbl.Parent = pill
+		titleLbl.Parent = headFrame
 		titleLbl.BackgroundTransparency = 1
-		titleLbl.Position = UDim2.new(0, 46, 0, 8)
-		titleLbl.Size = UDim2.new(1, -112, 0, 16)
+		titleLbl.Position = UDim2.fromOffset(10, 0)
+		titleLbl.Size = UDim2.new(1, -20, 1, -1)
 		titleLbl.Font = Enum.Font.GothamBold
-		titleLbl.Text = "Info"
+		titleLbl.Text = titleStr
 		titleLbl.TextColor3 = Theme.TextBright
-		titleLbl.TextSize = 13
+		titleLbl.TextSize = 12
 		titleLbl.TextXAlignment = Enum.TextXAlignment.Left
 		titleLbl.TextTruncate = Enum.TextTruncate.AtEnd
-		titleLbl.ZIndex = 2
+		titleLbl.ZIndex = 3
 
-		bodyLbl.Name = "TextLabel"
-		bodyLbl.Parent = pill
+		local bodyLbl = Instance.new("TextLabel")
+		bodyLbl.Name = "BodyLabel"
+		bodyLbl.Parent = panel
 		bodyLbl.BackgroundTransparency = 1
-		bodyLbl.Position = UDim2.new(0, 46, 0, 25)
-		bodyLbl.Size = UDim2.new(1, -56, 1, -33)
+		bodyLbl.Position = UDim2.fromOffset(12, 27)
+		bodyLbl.Size = UDim2.new(1, -22, 1, -33)
 		bodyLbl.Font = Enum.Font.Gotham
-		bodyLbl.Text = "Notification"
+		bodyLbl.Text = bodyStr
 		bodyLbl.TextColor3 = Theme.Text
 		bodyLbl.TextSize = 12
 		bodyLbl.TextWrapped = true
@@ -4279,29 +4000,28 @@ do
 		bodyLbl.TextYAlignment = Enum.TextYAlignment.Top
 		bodyLbl.ZIndex = 2
 
-		progressBar.Name = "ProgressBar"
-		progressBar.Parent = pill
-		progressBar.AnchorPoint = Vector2.new(0, 1)
-		progressBar.BackgroundColor3 = Theme.Track
-		progressBar.BorderSizePixel = 0
-		progressBar.Position = UDim2.new(0, 0, 1, 0)
-		progressBar.Size = UDim2.new(1, 0, 0, 2)
-		progressBar.ZIndex = 2
+		local track = Instance.new("Frame")
+		track.Name = "ProgressTrack"
+		track.Parent = panel
+		track.AnchorPoint = Vector2.new(0, 1)
+		track.Position = UDim2.new(0, 2, 1, 0)
+		track.Size = UDim2.new(1, -2, 0, 2)
+		track.BackgroundColor3 = Theme.Track
+		track.BorderSizePixel = 0
+		track.ZIndex = 3
 
-		progressFill.Name = "ProgressBarInner"
-		progressFill.Parent = progressBar
-		progressFill.BackgroundColor3 = Theme.Accent
-		progressFill.BorderSizePixel = 0
-		progressFill.Size = UDim2.new(1, 0, 1, 0)
-		progressFill.ZIndex = 3
+		local fill = Instance.new("Frame")
+		fill.Name = "ProgressFill"
+		fill.Parent = track
+		fill.BackgroundColor3 = accentColor
+		fill.BorderSizePixel = 0
+		fill.Size = UDim2.new(1, 0, 1, 0)
+		fill.ZIndex = 4
 
-		progressCorner.CornerRadius = UDim.new(1, 0)
-		progressCorner.Parent = progressFill
-
-		return root
+		return root, outerStroke, fill
 	end
 
-	local function get_notif_target_pos(cardW, cardH, stackOffset)
+	local function get_target_pos(cardW, cardH, stackOffset)
 		local isLeft = notifCornerMode:find("Left") ~= nil
 		local isBottom = notifCornerMode:find("Bottom") ~= nil
 		local xScale = isLeft and 0 or 1
@@ -4311,7 +4031,7 @@ do
 		return UDim2.new(xScale, xOff, yScale, yOff)
 	end
 
-	local function get_notif_offscreen_pos(cardW, yScale, yOff)
+	local function get_offscreen_pos(cardW, yScale, yOff)
 		local isLeft = notifCornerMode:find("Left") ~= nil
 		if isLeft then
 			return UDim2.new(0, -(cardW + 24), yScale, yOff)
@@ -4320,18 +4040,17 @@ do
 		end
 	end
 
-	local function update_notification_positions()
+	local function reflow_notifications()
 		local stackY = 14
 		for i = #activeNotifications, 1, -1 do
 			local notif = activeNotifications[i]
 			if notif and notif.Instance and notif.Instance.Parent and not notif._dismissing then
 				local sz = notif.Instance.Size
 				local cw, ch = sz.X.Offset, sz.Y.Offset
-				local targetPos = get_notif_target_pos(cw, ch, stackY)
-				tweenservice:Create(notif.Instance, TweenInfo.new(0.22, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
-					Position = targetPos
+				tweenservice:Create(notif.Instance, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+					Position = get_target_pos(cw, ch, stackY)
 				}):Play()
-				stackY += ch + 8
+				stackY += ch + 6
 			end
 		end
 	end
@@ -4340,7 +4059,7 @@ do
 		if type(mode) == "string" and mode ~= "" then
 			notifCornerMode = mode
 			_G.BSMTConfigData["notif_position"] = mode
-			update_notification_positions()
+			reflow_notifications()
 		end
 	end
 
@@ -4348,8 +4067,8 @@ do
 		restore_id()
 		local message, nType, dur, titleOverride
 		if type(messageOrOpts) == "table" then
-			message = messageOrOpts.Text or messageOrOpts.Message or messageOrOpts.Content or "Notification"
-			nType = messageOrOpts.Type or notifType or "info"
+			message = tostring(messageOrOpts.Text or messageOrOpts.Message or messageOrOpts.Content or "Notification")
+			nType = tostring(messageOrOpts.Type or notifType or "info")
 			dur = tonumber(messageOrOpts.Duration) or tonumber(duration) or 4
 			titleOverride = messageOrOpts.Title or customTitle
 		else
@@ -4367,40 +4086,30 @@ do
 		end
 
 		local notification = setmetatable({}, notificationHandler)
-		create_notification_container()
+		ensure_notif_container()
 
-		local cardW = is_mobile and math.min(280, math.round(cam.ViewportSize.X * 0.78)) or 300
+		local palette = {
+			success = { title = "Success", color = Color3.fromRGB(85, 205, 140) },
+			error   = { title = "Error",   color = Color3.fromRGB(230, 85, 90) },
+			warning = { title = "Warning", color = Color3.fromRGB(235, 180, 75) },
+			info    = { title = "BSMT",    color = Theme.Accent },
+		}
+		local cfg = palette[nType:lower()] or palette.info
+		local headerText = titleOverride or cfg.title
+
+		local cardW = is_mobile and math.min(260, math.round(cam.ViewportSize.X * 0.76)) or 276
 		local textParams = Instance.new("GetTextBoundsParams")
 		textParams.Text = message
 		textParams.Font = Font.fromEnum(Enum.Font.Gotham)
 		textParams.Size = 12
-		textParams.Width = math.max(120, cardW - 58)
+		textParams.Width = math.max(110, cardW - 26)
 		local okBounds, bounds = pcall(function() return textservice:GetTextBoundsAsync(textParams) end)
-		local textH = (okBounds and bounds and bounds.Y) or 18
-		local cardH = math.clamp(textH + 38, 56, 130)
+		local textH = (okBounds and bounds and bounds.Y) or 16
+		local cardH = math.clamp(textH + 36, 52, 124)
 
-		local inst = create_notification_card(cardW, cardH)
-		local pill = inst.Background
-
-		local typeConfigs = {
-			success = { title = "Success", sym = "✓", color = Color3.fromRGB(75, 215, 135) },
-			error   = { title = "Error",   sym = "✕", color = Color3.fromRGB(240, 82, 82) },
-			warning = { title = "Warning", sym = "!", color = Color3.fromRGB(245, 190, 65) },
-			info    = { title = "Info",    sym = "i", color = Theme.Accent },
-		}
-		local cfg = typeConfigs[nType:lower()] or typeConfigs.info
-
-		pill.AccentBar.BackgroundColor3 = cfg.color
-		pill.IconBadge.IconSym.Text = cfg.sym
-		pill.IconBadge.IconSym.TextColor3 = cfg.color
-		pill.IconBadge.UIStroke.Color = cfg.color:Lerp(Theme.Stroke, 0.55)
-		pill.TitleLabel.Text = titleOverride or cfg.title
-		pill.TitleLabel.TextColor3 = cfg.color
-		pill.TextLabel.Text = message
-		pill.ProgressBar.ProgressBarInner.BackgroundColor3 = cfg.color
-
-		local startTarget = get_notif_target_pos(cardW, cardH, 14)
-		inst.Position = get_notif_offscreen_pos(cardW, startTarget.Y.Scale, startTarget.Y.Offset)
+		local inst, outerStroke, fill = build_notif_frame(cardW, cardH, cfg.color, headerText, message)
+		local startTarget = get_target_pos(cardW, cardH, 14)
+		inst.Position = get_offscreen_pos(cardW, startTarget.Y.Scale, startTarget.Y.Offset)
 
 		notification.Instance = inst
 		notification.Duration = dur
@@ -4411,25 +4120,20 @@ do
 		inst.Parent = notificationContainer
 		table.insert(activeNotifications, notification)
 
-		pill.CloseBtn.Activated:Connect(function()
-			notification:Dismiss()
-		end)
 		inst.Activated:Connect(function()
 			notification:Dismiss()
 		end)
 		inst.MouseEnter:Connect(function()
 			notification._paused = true
-			pill.UIStroke.Color = cfg.color:Lerp(Theme.Stroke, 0.35)
+			outerStroke.Color = cfg.color:Lerp(Theme.Stroke, 0.45)
 		end)
 		inst.MouseLeave:Connect(function()
 			notification._paused = false
-			pill.UIStroke.Color = Theme.Stroke
+			outerStroke.Color = Theme.Stroke
 		end)
 
-		update_notification_positions()
+		reflow_notifications()
 
-		local fill = pill.ProgressBar.ProgressBarInner
-		local timerLbl = pill.TimerLabel
 		task.spawn(function()
 			local lastTick = os.clock()
 			while library_alive and inst.Parent and not notification._dismissing do
@@ -4438,17 +4142,13 @@ do
 				lastTick = now
 				if not notification._paused then
 					notification.Remaining = math.max(0, notification.Remaining - dt)
-					local pct = math.clamp(notification.Remaining / dur, 0, 1)
-					fill.Size = UDim2.new(pct, 0, 1, 0)
-					timerLbl.Text = string.format("%.1fs", notification.Remaining)
+					fill.Size = UDim2.new(math.clamp(notification.Remaining / dur, 0, 1), 0, 1, 0)
 					if notification.Remaining <= 0 then
 						notification:Dismiss()
 						break
 					end
-				else
-					timerLbl.Text = "hold"
 				end
-				task.wait(0.04)
+				task.wait(0.03)
 			end
 		end)
 
@@ -4460,18 +4160,18 @@ do
 		self._dismissing = true
 		local sz = self.Instance.Size
 		local curPos = self.Instance.Position
-		local outPos = get_notif_offscreen_pos(sz.X.Offset, curPos.Y.Scale, curPos.Y.Offset)
+		local outPos = get_offscreen_pos(sz.X.Offset, curPos.Y.Scale, curPos.Y.Offset)
 		for i, n in ipairs(activeNotifications) do
 			if n == self then
 				table.remove(activeNotifications, i)
 				break
 			end
 		end
-		update_notification_positions()
-		tweenservice:Create(self.Instance, TweenInfo.new(0.22, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {
+		reflow_notifications()
+		tweenservice:Create(self.Instance, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {
 			Position = outPos
 		}):Play()
-		task.delay(0.24, function()
+		task.delay(0.22, function()
 			if self.Instance then
 				pcall(function() self.Instance:Destroy() end)
 			end
@@ -4502,7 +4202,7 @@ local function snapshot_config_table()
 			payload[k] = v
 		end
 	end
-	for _, k in ipairs(KNOWN_G_KEYS) do
+	for k in pairs(synced_flags) do
 		local gv = read_flag_val(k)
 		if gv ~= nil then
 			if typeof(gv) == "Color3" then
@@ -4522,10 +4222,11 @@ local function apply_config_table(result)
 	if type(result) ~= "table" then return false end
 	for identifier, value in pairs(result) do
 		_G.BSMTConfigData[identifier] = value
-		if COLOR_G_KEYS[identifier] then
+		local curG = read_flag_val(identifier)
+		if typeof(curG) == "Color3" then
 			local c3 = parse_color(value)
 			if c3 then write_flag_val(identifier, c3) end
-		elseif KNOWN_G_SET[identifier] then
+		elseif synced_flags[identifier] or curG ~= nil then
 			if type(value) == "table" then
 				write_flag_val(identifier, deep_copy_table(value))
 			else
@@ -4578,7 +4279,7 @@ end
 function Library.ResetConfig()
 	restore_id()
 	local defaults = {}
-	for k, v in pairs(default_g_values) do
+	for k, v in pairs(default_flag_values) do
 		defaults[k] = type(v) == "table" and deep_copy_table(v) or v
 	end
 	apply_config_table(defaults)
@@ -4798,7 +4499,7 @@ function elementHandler:Toggle(toggleName, callback, configIdentifier)
 	end
 
 	_G.BSMTConfigData[syncKey] = toggle.Enabled
-	if configIdentifier or KNOWN_G_SET[syncKey] or extVal ~= nil then
+	if configIdentifier or synced_flags[syncKey] or extVal ~= nil then
 		write_flag_val(syncKey, toggle.Enabled)
 	end
 
@@ -5303,8 +5004,8 @@ function windowHandler:ConfigTab()
 		end)
 	end
 
-	rightSec:Title("Session Telemetry")
-	local uptimeLabel = rightSec:Label("Uptime: 00:00 | Active Toggles: 0")
+	rightSec:Title("Session")
+	local uptimeLabel = rightSec:Label("Uptime: 00:00")
 
 	do
 		local ok, uptimeText = pcall(function()
@@ -5319,12 +5020,7 @@ function windowHandler:ConfigTab()
 				local h = math.floor(secs / 3600)
 				local m = math.floor((secs % 3600) / 60)
 				local s = secs % 60
-				local activeCnt = 0
-				for _, k in ipairs(KNOWN_G_KEYS) do
-					if read_flag_val(k) == true then activeCnt += 1 end
-				end
-				local up = h > 0 and string.format("%d:%02d:%02d", h, m, s) or string.format("%02d:%02d", m, s)
-				local str = string.format("Uptime: %s | Active Toggles: %d", up, activeCnt)
+				local str = h > 0 and string.format("Uptime: %d:%02d:%02d", h, m, s) or string.format("Uptime: %02d:%02d", m, s)
 				if str ~= lastStr then
 					lastStr = str
 					uptimeText.Text = str
@@ -5499,182 +5195,119 @@ do
 	screenGui.DisplayOrder = 999
 	screenGui.IgnoreGuiInset = true
 
-	local shell = Instance.new("Frame")
-	shell.Name = "Shell"
-	shell.Parent = screenGui
-	shell.AnchorPoint = Vector2.new(0, 0)
-	shell.Position = UDim2.fromOffset(14, 14)
-	shell.Size = UDim2.new(0, 10, 0, 30)
-	shell.AutomaticSize = Enum.AutomaticSize.X
-	shell.BackgroundColor3 = Theme.Background
-	shell.BackgroundTransparency = 0.05
-	shell.BorderSizePixel = 0
-	shell.Active = true
+	local outer = Instance.new("Frame")
+	outer.Name = "Outer"
+	outer.Parent = screenGui
+	outer.AnchorPoint = Vector2.new(0, 0)
+	outer.Position = UDim2.fromOffset(14, 14)
+	outer.Size = UDim2.new(0, 0, 0, 26)
+	outer.AutomaticSize = Enum.AutomaticSize.X
+	outer.BackgroundColor3 = Theme.BackgroundDark
+	outer.BorderSizePixel = 0
+	outer.Active = true
 
-	local shellCorner = Instance.new("UICorner")
-	shellCorner.CornerRadius = UDim.new(0, 8)
-	shellCorner.Parent = shell
+	local outerCorner = Instance.new("UICorner")
+	outerCorner.CornerRadius = UDim.new(0, 6)
+	outerCorner.Parent = outer
 
-	local shellStroke = Instance.new("UIStroke")
-	shellStroke.Color = Theme.Stroke
-	shellStroke.Thickness = 1
-	shellStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	shellStroke.Parent = shell
+	local outerStroke = Instance.new("UIStroke")
+	outerStroke.Color = Theme.Stroke
+	outerStroke.Thickness = 1
+	outerStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	outerStroke.Parent = outer
 
-	local topLine = Instance.new("Frame")
-	topLine.Name = "TopAccentLine"
-	topLine.Parent = shell
-	topLine.AnchorPoint = Vector2.new(0.5, 0)
-	topLine.Position = UDim2.new(0.5, 0, 0, 0)
-	topLine.Size = UDim2.new(1, -12, 0, 2)
-	topLine.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-	topLine.BorderSizePixel = 0
-	topLine.ZIndex = 4
+	local panel = Instance.new("Frame")
+	panel.Name = "Panel"
+	panel.Parent = outer
+	panel.BackgroundColor3 = Theme.Panel
+	panel.BorderSizePixel = 0
+	panel.Position = UDim2.fromOffset(0, 0)
+	panel.Size = UDim2.new(0, 0, 1, 0)
+	panel.AutomaticSize = Enum.AutomaticSize.X
 
-	local topLineCorner = Instance.new("UICorner")
-	topLineCorner.CornerRadius = UDim.new(1, 0)
-	topLineCorner.Parent = topLine
+	local panelCorner = Instance.new("UICorner")
+	panelCorner.CornerRadius = UDim.new(0, 6)
+	panelCorner.Parent = panel
 
-	local topLineGrad = Instance.new("UIGradient")
-	topLineGrad.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0.0, Theme.AccentSecondary),
-		ColorSequenceKeypoint.new(0.5, Theme.AccentBright),
-		ColorSequenceKeypoint.new(1.0, Theme.Accent),
-	})
-	topLineGrad.Parent = topLine
+	local leftAccent = Instance.new("Frame")
+	leftAccent.Name = "LeftAccent"
+	leftAccent.Parent = outer
+	leftAccent.AnchorPoint = Vector2.new(0, 0.5)
+	leftAccent.Position = UDim2.new(0, 0, 0.5, 0)
+	leftAccent.Size = UDim2.new(0, 2, 1, -8)
+	leftAccent.BackgroundColor3 = Theme.Accent
+	leftAccent.BorderSizePixel = 0
+	leftAccent.ZIndex = 3
 
-	local rowHolder = Instance.new("Frame")
-	rowHolder.Name = "RowHolder"
-	rowHolder.Parent = shell
-	rowHolder.BackgroundTransparency = 1
-	rowHolder.Size = UDim2.new(0, 0, 1, 0)
-	rowHolder.AutomaticSize = Enum.AutomaticSize.X
+	local leftAccentCorner = Instance.new("UICorner")
+	leftAccentCorner.CornerRadius = UDim.new(1, 0)
+	leftAccentCorner.Parent = leftAccent
 
-	local layout = Instance.new("UIListLayout")
-	layout.Parent = rowHolder
-	layout.FillDirection = Enum.FillDirection.Horizontal
-	layout.VerticalAlignment = Enum.VerticalAlignment.Center
-	layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-	layout.Padding = UDim.new(0, 6)
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	local row = Instance.new("Frame")
+	row.Name = "Row"
+	row.Parent = panel
+	row.BackgroundTransparency = 1
+	row.Size = UDim2.new(0, 0, 1, 0)
+	row.AutomaticSize = Enum.AutomaticSize.X
 
-	local rowPadding = Instance.new("UIPadding")
-	rowPadding.PaddingLeft = UDim.new(0, 10)
-	rowPadding.PaddingRight = UDim.new(0, 10)
-	rowPadding.PaddingTop = UDim.new(0, 2)
-	rowPadding.Parent = rowHolder
+	local rowLayout = Instance.new("UIListLayout")
+	rowLayout.Parent = row
+	rowLayout.FillDirection = Enum.FillDirection.Horizontal
+	rowLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	rowLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+	rowLayout.Padding = UDim.new(0, 0)
+	rowLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
-	local function make_chip(order, withDot)
-		local chip = Instance.new("Frame")
-		chip.Name = "Chip" .. order
-		chip.Parent = rowHolder
-		chip.BackgroundColor3 = Theme.Element
-		chip.BackgroundTransparency = 0.25
-		chip.BorderSizePixel = 0
-		chip.Size = UDim2.new(0, 0, 0, 20)
-		chip.AutomaticSize = Enum.AutomaticSize.X
-		chip.LayoutOrder = order
+	local rowPad = Instance.new("UIPadding")
+	rowPad.PaddingLeft = UDim.new(0, 10)
+	rowPad.PaddingRight = UDim.new(0, 10)
+	rowPad.Parent = row
 
-		local cc = Instance.new("UICorner")
-		cc.CornerRadius = UDim.new(0, 5)
-		cc.Parent = chip
-
-		local cl = Instance.new("UIListLayout")
-		cl.Parent = chip
-		cl.FillDirection = Enum.FillDirection.Horizontal
-		cl.VerticalAlignment = Enum.VerticalAlignment.Center
-		cl.Padding = UDim.new(0, 5)
-		cl.SortOrder = Enum.SortOrder.LayoutOrder
-
-		local cp = Instance.new("UIPadding")
-		cp.PaddingLeft = UDim.new(0, 7)
-		cp.PaddingRight = UDim.new(0, 7)
-		cp.Parent = chip
-
-		local dot
-		if withDot then
-			dot = Instance.new("Frame")
-			dot.Name = "Dot"
-			dot.Parent = chip
-			dot.Size = UDim2.fromOffset(6, 6)
-			dot.BackgroundColor3 = Theme.Accent
-			dot.BorderSizePixel = 0
-			dot.LayoutOrder = 1
-			local dc = Instance.new("UICorner")
-			dc.CornerRadius = UDim.new(1, 0)
-			dc.Parent = dot
-		end
-
+	local function add_text(text, color, font, order)
 		local lbl = Instance.new("TextLabel")
-		lbl.Name = "Value"
-		lbl.Parent = chip
+		lbl.Name = "Item" .. order
+		lbl.Parent = row
 		lbl.BackgroundTransparency = 1
 		lbl.AutomaticSize = Enum.AutomaticSize.X
 		lbl.Size = UDim2.new(0, 0, 1, 0)
-		lbl.Font = Enum.Font.GothamMedium
-		lbl.Text = "--"
-		lbl.TextColor3 = Theme.Text
-		lbl.TextSize = 11
-		lbl.LayoutOrder = 2
-
-		return chip, lbl, dot
+		lbl.Font = font
+		lbl.Text = text
+		lbl.TextColor3 = color
+		lbl.TextSize = 12
+		lbl.LayoutOrder = order
+		return lbl
 	end
 
-	local brandChip = Instance.new("Frame")
-	brandChip.Name = "BrandChip"
-	brandChip.Parent = rowHolder
-	brandChip.BackgroundTransparency = 1
-	brandChip.Size = UDim2.new(0, 0, 0, 20)
-	brandChip.AutomaticSize = Enum.AutomaticSize.X
-	brandChip.LayoutOrder = 1
+	local function add_sep(order)
+		local wrap = Instance.new("Frame")
+		wrap.Name = "Sep" .. order
+		wrap.Parent = row
+		wrap.BackgroundTransparency = 1
+		wrap.Size = UDim2.new(0, 16, 1, 0)
+		wrap.LayoutOrder = order
 
-	local brandLayout = Instance.new("UIListLayout")
-	brandLayout.Parent = brandChip
-	brandLayout.FillDirection = Enum.FillDirection.Horizontal
-	brandLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-	brandLayout.Padding = UDim.new(0, 6)
-	brandLayout.SortOrder = Enum.SortOrder.LayoutOrder
-
-	local brandIcon = Instance.new("ImageLabel")
-	brandIcon.Name = "BrandIcon"
-	brandIcon.Parent = brandChip
-	brandIcon.BackgroundTransparency = 1
-	brandIcon.Size = UDim2.fromOffset(14, 14)
-	brandIcon.Image = "rbxassetid://10746039695"
-	brandIcon.ImageColor3 = Theme.Accent
-	brandIcon.LayoutOrder = 1
-
-	local lblBrand = Instance.new("TextLabel")
-	lblBrand.Name = "BrandText"
-	lblBrand.Parent = brandChip
-	lblBrand.BackgroundTransparency = 1
-	lblBrand.AutomaticSize = Enum.AutomaticSize.X
-	lblBrand.Size = UDim2.new(0, 0, 1, 0)
-	lblBrand.Font = Enum.Font.GothamBold
-	lblBrand.Text = "BSMT"
-	lblBrand.TextColor3 = Theme.TextBright
-	lblBrand.TextSize = 12
-	lblBrand.LayoutOrder = 2
-
-	local _, lblFps, dotFps = make_chip(2, true)
-	local _, lblPing, dotPing = make_chip(3, true)
-	local _, lblActive, dotActive = make_chip(4, true)
-	local _, lblUptime = make_chip(5, false)
-
-	lblActive.Text = "0 ON"
-	dotActive.BackgroundColor3 = Theme.Accent
-
-	local function fps_color(v)
-		if v >= 55 then return Color3.fromRGB(75, 215, 135)
-		elseif v >= 30 then return Color3.fromRGB(245, 190, 65)
-		else return Color3.fromRGB(240, 82, 82) end
+		local bar = Instance.new("Frame")
+		bar.Name = "Bar"
+		bar.Parent = wrap
+		bar.AnchorPoint = Vector2.new(0.5, 0.5)
+		bar.Position = UDim2.fromScale(0.5, 0.5)
+		bar.Size = UDim2.fromOffset(1, 11)
+		bar.BackgroundColor3 = Theme.Stroke
+		bar.BorderSizePixel = 0
+		return wrap
 	end
 
-	local function ping_color(v)
-		if v <= 80 then return Color3.fromRGB(75, 215, 135)
-		elseif v <= 150 then return Color3.fromRGB(245, 190, 65)
-		else return Color3.fromRGB(240, 82, 82) end
-	end
+	local lblBrand = add_text("BSMT", Theme.Accent, Enum.Font.GothamBold, 1)
+	add_sep(2)
+	add_text(player.Name, Theme.Text, Enum.Font.GothamMedium, 3)
+	add_sep(4)
+	local lblFpsVal = add_text("--", Theme.TextBright, Enum.Font.GothamBold, 5)
+	add_text(" fps", Theme.TextMuted, Enum.Font.Gotham, 6)
+	add_sep(7)
+	local lblPingVal = add_text("--", Theme.TextBright, Enum.Font.GothamBold, 8)
+	add_text(" ms", Theme.TextMuted, Enum.Font.Gotham, 9)
+	add_sep(10)
+	local lblTime = add_text("00:00", Theme.TextMuted, Enum.Font.GothamMedium, 11)
 
 	local function format_uptime(secs)
 		local s = math.floor(secs)
@@ -5689,18 +5322,18 @@ do
 	local wmDragStart = nil
 	local wmStartPos = nil
 
-	shell.InputBegan:Connect(function(input)
+	outer.InputBegan:Connect(function(input)
 		if is_primary_input(input) then
 			wmDragging = true
 			wmDragInput = input
 			wmDragStart = Vector2.new(input.Position.X, input.Position.Y)
-			wmStartPos = Vector2.new(shell.AbsolutePosition.X, shell.AbsolutePosition.Y)
-			shell.AnchorPoint = Vector2.new(0, 0)
-			shell.Position = UDim2.fromOffset(wmStartPos.X, wmStartPos.Y)
+			wmStartPos = Vector2.new(outer.AbsolutePosition.X, outer.AbsolutePosition.Y)
+			outer.AnchorPoint = Vector2.new(0, 0)
+			outer.Position = UDim2.fromOffset(wmStartPos.X, wmStartPos.Y)
 		end
 	end)
 
-	shell.InputChanged:Connect(function(input)
+	outer.InputChanged:Connect(function(input)
 		if is_move_input(input) then
 			wmDragInput = input
 		end
@@ -5710,10 +5343,10 @@ do
 		if wmDragging and (input == wmDragInput or input.UserInputType == Enum.UserInputType.Touch) then
 			local delta = Vector2.new(input.Position.X, input.Position.Y) - wmDragStart
 			local vp = cam.ViewportSize
-			local sz = shell.AbsoluteSize
+			local sz = outer.AbsoluteSize
 			local nx = math.clamp(wmStartPos.X + delta.X, 6, math.max(6, vp.X - sz.X - 6))
 			local ny = math.clamp(wmStartPos.Y + delta.Y, 6, math.max(6, vp.Y - sz.Y - 6))
-			shell.Position = UDim2.fromOffset(math.round(nx), math.round(ny))
+			outer.Position = UDim2.fromOffset(math.round(nx), math.round(ny))
 		end
 	end))
 
@@ -5728,20 +5361,20 @@ do
 		local p = tostring(presetName or "Top Left")
 		_G.BSMTConfigData["watermark_position"] = p
 		if p == "Top Center" then
-			shell.AnchorPoint = Vector2.new(0.5, 0)
-			shell.Position = UDim2.new(0.5, 0, 0, 12)
+			outer.AnchorPoint = Vector2.new(0.5, 0)
+			outer.Position = UDim2.new(0.5, 0, 0, 12)
 		elseif p == "Top Right" then
-			shell.AnchorPoint = Vector2.new(1, 0)
-			shell.Position = UDim2.new(1, -14, 0, 12)
+			outer.AnchorPoint = Vector2.new(1, 0)
+			outer.Position = UDim2.new(1, -14, 0, 12)
 		elseif p == "Bottom Left" then
-			shell.AnchorPoint = Vector2.new(0, 1)
-			shell.Position = UDim2.new(0, 14, 1, -12)
+			outer.AnchorPoint = Vector2.new(0, 1)
+			outer.Position = UDim2.new(0, 14, 1, -12)
 		elseif p == "Bottom Right" then
-			shell.AnchorPoint = Vector2.new(1, 1)
-			shell.Position = UDim2.new(1, -14, 1, -12)
+			outer.AnchorPoint = Vector2.new(1, 1)
+			outer.Position = UDim2.new(1, -14, 1, -12)
 		else
-			shell.AnchorPoint = Vector2.new(0, 0)
-			shell.Position = UDim2.new(0, 14, 0, 12)
+			outer.AnchorPoint = Vector2.new(0, 0)
+			outer.Position = UDim2.new(0, 14, 0, 12)
 		end
 	end
 
@@ -5750,7 +5383,7 @@ do
 	local frameCount = 0
 	local lastFpsTime = tick()
 	local pingTimer = 0
-	local lastUptimeStr = nil
+	local lastTimeStr = nil
 
 	local function update_watermark(dt)
 		local now = tick()
@@ -5759,45 +5392,22 @@ do
 			local fps = math.round(frameCount / (now - lastFpsTime))
 			frameCount = 0
 			lastFpsTime = now
-			if read_flag_val("fps_spoof") == true then
-				local baseFps = tonumber(read_flag_val("fps_val")) or 240
-				local jit = tonumber(read_flag_val("fps_jitter")) or 0
-				fps = math.max(1, baseFps + (jit > 0 and math.random(-jit, jit) or 0))
-			end
-			local col = fps_color(fps)
-			lblFps.Text = tostring(fps) .. " FPS"
-			dotFps.BackgroundColor3 = col
+			lblFpsVal.Text = tostring(fps)
 		end
 
 		pingTimer += dt
 		if pingTimer >= 0.8 then
 			pingTimer = 0
-			local ping = 0
-			if read_flag_val("ping_spoof") == true then
-				local basePing = tonumber(read_flag_val("ping_val")) or 18
-				local jit = tonumber(read_flag_val("ping_jitter")) or 0
-				ping = math.max(1, basePing + (jit > 0 and math.random(-jit, jit) or 0))
-			else
-				local ok, rawPing = pcall(function()
-					return math.round(stats.Network.ServerStatsItem["Data Ping"]:GetValue())
-				end)
-				if ok and rawPing then ping = rawPing end
+			local ok, rawPing = pcall(function()
+				return math.round(stats.Network.ServerStatsItem["Data Ping"]:GetValue())
+			end)
+			if ok and rawPing then
+				lblPingVal.Text = tostring(rawPing)
 			end
-			local pcol = ping_color(ping)
-			lblPing.Text = tostring(ping) .. " ms"
-			dotPing.BackgroundColor3 = pcol
-
-			local activeCnt = 0
-			for _, k in ipairs(KNOWN_G_KEYS) do
-				if read_flag_val(k) == true then activeCnt += 1 end
-			end
-			lblActive.Text = tostring(activeCnt) .. " ON"
-			dotActive.BackgroundColor3 = activeCnt > 0 and Theme.Accent or Theme.TextDim
-
 			local uptimeStr = format_uptime(now - scriptStartTime)
-			if uptimeStr ~= lastUptimeStr then
-				lastUptimeStr = uptimeStr
-				lblUptime.Text = uptimeStr
+			if uptimeStr ~= lastTimeStr then
+				lastTimeStr = uptimeStr
+				lblTime.Text = uptimeStr
 			end
 		end
 	end
@@ -5813,7 +5423,7 @@ do
 
 	local function set_watermark_visible(v)
 		wmVisible = v
-		shell.Visible = v
+		outer.Visible = v
 		_G.BSMTConfigData["watermark_enabled"] = v
 		if v then start_watermark() else stop_watermark() end
 	end
