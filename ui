@@ -214,6 +214,9 @@ local function watch_genv(flag, apply, busy)
 end
 
 local is_mobile = uis.TouchEnabled and (not uis.MouseEnabled or cam.ViewportSize.Y <= 680)
+-- phones (not tablets): shortest side under 500pt -> compact single-column layout
+local is_phone = uis.TouchEnabled and math.min(cam.ViewportSize.X, cam.ViewportSize.Y) < 500
+local PHONE_SIDEBAR = 150
 local vp_size = cam.ViewportSize
 local scale_factor = math.clamp(vp_size.Y / 1080, 0.75, 1.35)
 
@@ -237,7 +240,9 @@ end
 
 local function compute_ui_scale()
 	local vp = get_viewport()
-	local auto = math.clamp(math.min(vp.X / UI_REF_W, vp.Y / UI_REF_H), 0.6, 1)
+	local rw, rh = UI_REF_W, UI_REF_H
+	if is_phone then rw, rh = 780, 430 end
+	local auto = math.clamp(math.min(vp.X / rw, vp.Y / rh), 0.6, 1)
 	return math.clamp(auto * ui_scale_user, 0.5, 1.5)
 end
 
@@ -279,6 +284,16 @@ end
 
 ui_scale_current = compute_ui_scale()
 track_conn(cam:GetPropertyChangedSignal("ViewportSize"):Connect(refresh_ui_scale))
+
+-- AbsolutePosition / InputObject.Position are reported *below* the topbar
+-- inset, but our ScreenGuis use IgnoreGuiInset = true. Convert before writing
+-- an AbsolutePosition back into a Position, or the element jumps up by the
+-- inset (58px on the new topbar) every time.
+local function abs_to_gui(v)
+	local ok, inset = pcall(function() return guiservice:GetGuiInset() end)
+	if ok and inset then return v + inset end
+	return v
+end
 
 -- Top of the usable screen on touch devices (below Roblox's topbar buttons)
 local function get_top_inset()
@@ -422,35 +437,44 @@ local function decode_binding(str)
 end
 
 local Theme = {
-	Background      = Color3.fromRGB(11, 13, 18),
-	BackgroundDark  = Color3.fromRGB(9, 11, 15),
-	Panel           = Color3.fromRGB(15, 18, 25),
-	Element         = Color3.fromRGB(20, 24, 34),
-	ElementLight    = Color3.fromRGB(26, 31, 44),
-	ToggleOff       = Color3.fromRGB(30, 36, 50),
-	Track           = Color3.fromRGB(24, 29, 40),
-	Stroke          = Color3.fromRGB(32, 38, 52),
+	Background      = Color3.fromRGB(13, 14, 17),
+	BackgroundDark  = Color3.fromRGB(9, 10, 12),
+	Panel           = Color3.fromRGB(19, 20, 24),
+	Element         = Color3.fromRGB(27, 28, 33),
+	ElementLight    = Color3.fromRGB(36, 38, 44),
+	ToggleOff       = Color3.fromRGB(41, 43, 50),
+	Track           = Color3.fromRGB(40, 42, 49),
+	Stroke          = Color3.fromRGB(33, 35, 41),
 	Accent          = Color3.fromRGB(130, 175, 255),
 	AccentSecondary = Color3.fromRGB(90, 135, 230),
 	AccentBright    = Color3.fromRGB(175, 205, 255),
-	Text            = Color3.fromRGB(220, 226, 238),
-	TextBright      = Color3.fromRGB(245, 248, 255),
-	TextMuted       = Color3.fromRGB(125, 134, 154),
-	TextDim         = Color3.fromRGB(82, 90, 108),
-	Heading         = Color3.fromRGB(20, 24, 34),
-	ElementInner    = Color3.fromRGB(9, 11, 15),
-	ElementCenter   = Color3.fromRGB(15, 18, 25),
+	Text            = Color3.fromRGB(222, 224, 229),
+	TextBright      = Color3.fromRGB(247, 248, 250),
+	TextMuted       = Color3.fromRGB(139, 143, 153),
+	TextDim         = Color3.fromRGB(94, 98, 108),
+	Heading         = Color3.fromRGB(26, 27, 32),
+	ElementInner    = Color3.fromRGB(10, 11, 13),
+	ElementCenter   = Color3.fromRGB(18, 19, 23),
 }
 
-local mob_mult = is_mobile and 1.22 or 1.0
+local function pick_font(name, fallback)
+	local ok, f = pcall(function() return Enum.Font[name] end)
+	return (ok and f) or fallback
+end
+local FONT_REG  = pick_font("BuilderSans", Enum.Font.Gotham)
+local FONT_MED  = pick_font("BuilderSansMedium", Enum.Font.GothamMedium)
+local FONT_SEMI = pick_font("BuilderSansBold", Enum.Font.GothamBold)
+local FONT_BOLD = pick_font("BuilderSansExtraBold", Enum.Font.GothamBold)
+
+local mob_mult = is_mobile and 1.2 or 1.0
 local M = {
 	ElementH    = math.round(26 * mob_mult),
 	ToggleH     = math.round(22 * mob_mult),
 	SliderH     = math.round(38 * mob_mult),
 	TabH        = math.round(34 * mob_mult),
 	SectionHead = math.round(32 * mob_mult),
-	TextSize    = is_mobile and 14 or 13,
-	TextSizeSm  = is_mobile and 13 or 12,
+	TextSize    = is_mobile and 16 or 14,
+	TextSizeSm  = is_mobile and 15 or 13,
 	Pad         = math.round(6 * mob_mult),
 	PadLg       = math.round(8 * mob_mult),
 	Border      = 1,
@@ -550,6 +574,10 @@ end
 function Library.IsMobile()
 	return is_mobile
 end
+
+Library.Version = "2.1-mobile"
+print(string.format("[BSMT UI] v%s loaded | scale %.2f | phone=%s | viewport %dx%d",
+	Library.Version, ui_scale_current, tostring(is_phone), get_viewport().X, get_viewport().Y))
 
 local elementHandler = {}
 local windowHandler = {}
@@ -699,6 +727,7 @@ local function create_original_elements()
 		backgroundStroke.Name = "BackgroundStroke"
 		backgroundStroke.Color = Theme.Stroke
 		backgroundStroke.Thickness = 1
+		backgroundStroke.Transparency = 0
 		backgroundStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 		backgroundStroke.Parent = background
 
@@ -749,7 +778,7 @@ local function create_original_elements()
 		title.BackgroundTransparency = 1
 		title.Position = UDim2.new(0, 36, 0, 0)
 		title.Size = UDim2.new(0.6, -36, 1, 0)
-		title.Font = Enum.Font.GothamBold
+		title.Font = FONT_SEMI
 		title.Text = "BSMT"
 		title.TextColor3 = Theme.TextBright
 		title.TextSize = M.TextSize + 1
@@ -764,7 +793,7 @@ local function create_original_elements()
 		buttonHolder.BackgroundTransparency = 1
 		buttonHolder.BorderSizePixel = 0
 		buttonHolder.Position = UDim2.new(1, 0, 0, 0)
-		buttonHolder.Size = UDim2.new(0, 90, 1, 0)
+		buttonHolder.Size = UDim2.new(0, is_mobile and 110 or 90, 1, 0)
 
 		buttonHolderList.Name = "ButtonHolderList"
 		buttonHolderList.Parent = buttonHolder
@@ -772,7 +801,7 @@ local function create_original_elements()
 		buttonHolderList.HorizontalAlignment = Enum.HorizontalAlignment.Right
 		buttonHolderList.SortOrder = Enum.SortOrder.LayoutOrder
 		buttonHolderList.VerticalAlignment = Enum.VerticalAlignment.Center
-		buttonHolderList.Padding = UDim.new(0, 8)
+		buttonHolderList.Padding = UDim.new(0, is_mobile and 14 or 8)
 
 		buttonHolderPadding.Name = "ButtonHolderPadding"
 		buttonHolderPadding.Parent = buttonHolder
@@ -782,7 +811,7 @@ local function create_original_elements()
 		plus.Parent = buttonHolder
 		plus.BackgroundTransparency = 1
 		plus.BorderSizePixel = 0
-		plus.Size = UDim2.fromOffset(16, 16)
+		plus.Size = UDim2.fromOffset(is_mobile and 20 or 16, is_mobile and 20 or 16)
 		plus.AutoButtonColor = false
 		plus.Rotation = 180
 		plus.Image = "http://www.roblox.com/asset/?id=11520007725"
@@ -797,7 +826,7 @@ local function create_original_elements()
 		minus.Parent = buttonHolder
 		minus.BackgroundTransparency = 1
 		minus.BorderSizePixel = 0
-		minus.Size = UDim2.fromOffset(16, 16)
+		minus.Size = UDim2.fromOffset(is_mobile and 20 or 16, is_mobile and 20 or 16)
 		minus.AutoButtonColor = false
 		minus.Image = "rbxassetid://11520996670"
 		minus.ImageColor3 = Theme.TextMuted
@@ -809,7 +838,7 @@ local function create_original_elements()
 		close.Parent = buttonHolder
 		close.BackgroundTransparency = 1
 		close.BorderSizePixel = 0
-		close.Size = UDim2.fromOffset(16, 16)
+		close.Size = UDim2.fromOffset(is_mobile and 20 or 16, is_mobile and 20 or 16)
 		close.AutoButtonColor = false
 		close.Image = "rbxassetid://11520882762"
 		close.ImageRectOffset = Vector2.new(48, 0)
@@ -827,6 +856,9 @@ local function create_original_elements()
 		holder.Size = UDim2.new(1, 0, 1, -38)
 
 		local sidebar_w = is_mobile and 0.25 or 0.23
+		-- phones: fixed-width sidebar so tab names never get squeezed
+		local sb_scale, sb_off = sidebar_w, 0
+		if is_phone then sb_scale, sb_off = 0, PHONE_SIDEBAR end
 
 		tabs.Name = "Tabs"
 		tabs.Parent = holder
@@ -836,7 +868,7 @@ local function create_original_elements()
 		tabs.BorderSizePixel = 0
 		tabs.Position = UDim2.new(0, 0, 0, 0)
 		tabs.ScrollBarThickness = 0
-		tabs.Size = UDim2.new(sidebar_w, 0, 1, 0)
+		tabs.Size = UDim2.new(sb_scale, sb_off, 1, 0)
 
 		tabsUIListLayout.Name = "TabsUIListLayout"
 		tabsUIListLayout.Parent = tabs
@@ -855,7 +887,7 @@ local function create_original_elements()
 		sidebarLine.AnchorPoint = Vector2.new(0, 0)
 		sidebarLine.BackgroundColor3 = Theme.Stroke
 		sidebarLine.BorderSizePixel = 0
-		sidebarLine.Position = UDim2.new(sidebar_w, 0, 0, 0)
+		sidebarLine.Position = UDim2.new(sb_scale, sb_off, 0, 0)
 		sidebarLine.Size = UDim2.new(0, 1, 1, 0)
 
 		pageLogo.Name = "PageLogo"
@@ -863,7 +895,7 @@ local function create_original_elements()
 		pageLogo.BackgroundTransparency = 1
 		pageLogo.BorderSizePixel = 0
 		pageLogo.Position = UDim2.new(1, -10, 1, -5)
-		pageLogo.Size = UDim2.new(1 - sidebar_w, -20, 1, -15)
+		pageLogo.Size = UDim2.new(1 - sb_scale, -20 - sb_off, 1, -15)
 		pageLogo.ZIndex = 0
 		pageLogo.Image = "rbxassetid://11435586663"
 		pageLogo.ImageTransparency = 1
@@ -985,7 +1017,7 @@ local function create_original_elements()
 		tabText.BackgroundTransparency = 1
 		tabText.Position = UDim2.new(0, 32, 0, 0)
 		tabText.Size = UDim2.new(1, -36, 1, 0)
-		tabText.Font = Enum.Font.GothamMedium
+		tabText.Font = FONT_MED
 		tabText.Text = "N/A"
 		tabText.TextColor3 = Theme.TextDim
 		tabText.TextSize = M.TextSize
@@ -1013,13 +1045,13 @@ local function create_original_elements()
 		page.BorderSizePixel = 0
 		page.Position = UDim2.new(1, -12, 0, 10)
 		page.Visible = false
-		page.Size = UDim2.new(1 - sidebar_w, -24, 1, -20)
+		page.Size = is_phone and UDim2.new(1, -(PHONE_SIDEBAR + 24), 1, -20) or UDim2.new(1 - sidebar_w, -24, 1, -20)
 
 		leftScrollingFrame.Name = "LeftScrollingFrame"
 		leftScrollingFrame.Active = true
 		leftScrollingFrame.BackgroundTransparency = 1
 		leftScrollingFrame.BorderSizePixel = 0
-		leftScrollingFrame.Size = UDim2.new(0.5, -6, 1, 0)
+		leftScrollingFrame.Size = is_phone and UDim2.new(1, 0, 1, 0) or UDim2.new(0.5, -6, 1, 0)
 		leftScrollingFrame.ScrollBarThickness = 2
 		leftScrollingFrame.ScrollBarImageColor3 = Theme.Stroke
 		leftScrollingFrame.CanvasSize = UDim2.fromScale(0, 0)
@@ -1047,6 +1079,7 @@ local function create_original_elements()
 		rightScrollingFrame.CanvasSize = UDim2.fromScale(0, 0)
 		rightScrollingFrame.ScrollBarThickness = 2
 		rightScrollingFrame.ScrollBarImageColor3 = Theme.Stroke
+		rightScrollingFrame.Visible = not is_phone
 		rightScrollingFrame.Parent = page
 
 		rightScrollingFrameList.Name = "RightScrollingFrameList"
@@ -1089,6 +1122,7 @@ local function create_original_elements()
 
 		sectionStroke.Name = "SectionStroke"
 		sectionStroke.Color = Theme.Stroke
+		sectionStroke.Transparency = 0.45
 		sectionStroke.Thickness = 1
 		sectionStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 		sectionStroke.Parent = section
@@ -1104,19 +1138,19 @@ local function create_original_elements()
 		headingSeperator.Parent = heading
 		headingSeperator.AnchorPoint = Vector2.new(0.5, 1)
 		headingSeperator.BackgroundColor3 = Theme.Stroke
-		headingSeperator.BackgroundTransparency = 0.35
+		headingSeperator.BackgroundTransparency = 0.5
 		headingSeperator.BorderSizePixel = 0
 		headingSeperator.Position = UDim2.new(0.5, 0, 1, 0)
-		headingSeperator.Size = UDim2.new(1, -20, 0, 1)
+		headingSeperator.Size = UDim2.new(1, -24, 0, 1)
 
 		title.Name = "Title"
 		title.Parent = heading
 		title.BackgroundTransparency = 1
 		title.Size = UDim2.new(1, -30, 1, 0)
-		title.Font = Enum.Font.GothamBold
+		title.Font = FONT_SEMI
 		title.Text = "Section"
-		title.TextColor3 = Theme.TextBright
-		title.TextSize = M.TextSize
+		title.TextColor3 = Theme.TextMuted
+		title.TextSize = M.TextSizeSm - 1
 		title.TextXAlignment = Enum.TextXAlignment.Left
 		title.TextTruncate = Enum.TextTruncate.AtEnd
 
@@ -1129,8 +1163,8 @@ local function create_original_elements()
 		resizeButton.AnchorPoint = Vector2.new(1, 0.5)
 		resizeButton.BackgroundTransparency = 1
 		resizeButton.BorderSizePixel = 0
-		resizeButton.Position = UDim2.new(1, -10, 0.5, 0)
-		resizeButton.Size = UDim2.fromOffset(14, 14)
+		resizeButton.Position = UDim2.new(1, -12, 0.5, 0)
+		resizeButton.Size = UDim2.fromOffset(11, 11)
 		resizeButton.Image = "rbxassetid://11269835227"
 		resizeButton.ImageColor3 = Theme.TextDim
 
@@ -1147,14 +1181,14 @@ local function create_original_elements()
 		elementHolderList.Name = "ElementHolderList"
 		elementHolderList.Parent = elementHolder
 		elementHolderList.SortOrder = Enum.SortOrder.LayoutOrder
-		elementHolderList.Padding = UDim.new(0, 6)
+		elementHolderList.Padding = UDim.new(0, is_mobile and 7 or 6)
 
 		elementHolderPadding.Name = "ElementHolderPadding"
 		elementHolderPadding.Parent = elementHolder
-		elementHolderPadding.PaddingBottom = UDim.new(0, 10)
-		elementHolderPadding.PaddingLeft = UDim.new(0, 10)
-		elementHolderPadding.PaddingRight = UDim.new(0, 10)
-		elementHolderPadding.PaddingTop = UDim.new(0, 8)
+		elementHolderPadding.PaddingBottom = UDim.new(0, 12)
+		elementHolderPadding.PaddingLeft = UDim.new(0, 12)
+		elementHolderPadding.PaddingRight = UDim.new(0, 12)
+		elementHolderPadding.PaddingTop = UDim.new(0, 10)
 
 		return section
 	end
@@ -1178,7 +1212,7 @@ local function create_original_elements()
 		titleText.Position = UDim2.new(0.5, 0, 0, 0)
 		titleText.Size = UDim2.new(0.4, 0, 1, 0)
 		titleText.ZIndex = 2
-		titleText.Font = Enum.Font.GothamMedium
+		titleText.Font = FONT_MED
 		titleText.TextColor3 = Theme.TextMuted
 		titleText.Text = "N/A"
 		titleText.TextSize = M.TextSizeSm
@@ -1223,6 +1257,7 @@ local function create_original_elements()
 		labelBackground.Name = "LabelBackground"
 		labelBackground.Parent = label
 		labelBackground.BackgroundColor3 = Theme.Element
+		labelBackground.BackgroundTransparency = 1
 		labelBackground.BorderSizePixel = 0
 		labelBackground.Size = UDim2.new(1, 0, 1, 0)
 
@@ -1230,6 +1265,7 @@ local function create_original_elements()
 		labelBgCorner.Parent = labelBackground
 
 		labelBgStroke.Color = Theme.Stroke
+		labelBgStroke.Transparency = 1
 		labelBgStroke.Thickness = 1
 		labelBgStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 		labelBgStroke.Parent = labelBackground
@@ -1242,7 +1278,7 @@ local function create_original_elements()
 		labelText.Position = UDim2.new(0.5, 0, 0, 0)
 		labelText.Size = UDim2.new(1, 0, 1, 0)
 		labelText.ZIndex = 2
-		labelText.Font = Enum.Font.Gotham
+		labelText.Font = FONT_REG
 		labelText.TextColor3 = Theme.TextMuted
 		labelText.TextSize = M.TextSizeSm
 		labelText.TextWrapped = true
@@ -1251,8 +1287,8 @@ local function create_original_elements()
 
 		labelTextPadding.Name = "LabelTextPadding"
 		labelTextPadding.Parent = labelText
-		labelTextPadding.PaddingLeft = UDim.new(0, 8)
-		labelTextPadding.PaddingRight = UDim.new(0, 8)
+		labelTextPadding.PaddingLeft = UDim.new(0, 0)
+		labelTextPadding.PaddingRight = UDim.new(0, 0)
 		labelTextPadding.PaddingBottom = UDim.new(0, 4)
 		labelTextPadding.PaddingTop = UDim.new(0, 4)
 
@@ -1296,15 +1332,15 @@ local function create_original_elements()
 		toggleText.BackgroundTransparency = 1
 		toggleText.Position = UDim2.new(0, 0, 0, 0)
 		toggleText.Size = UDim2.new(1, -44, 1, 0)
-		toggleText.Font = Enum.Font.Gotham
+		toggleText.Font = FONT_REG
 		toggleText.Text = "N/A"
 		toggleText.TextColor3 = Theme.Text
 		toggleText.TextSize = M.TextSize
 		toggleText.TextXAlignment = Enum.TextXAlignment.Left
 		toggleText.TextTruncate = Enum.TextTruncate.AtEnd
 
-		local track_w = is_mobile and 38 or 34
-		local track_h = is_mobile and 20 or 18
+		local track_w = is_mobile and 40 or 32
+		local track_h = is_mobile and 22 or 18
 		local knob_sz = track_h - 4
 
 		switchTrack.Name = "SwitchTrack"
@@ -1320,6 +1356,7 @@ local function create_original_elements()
 
 		switchTrackStroke.Name = "TrackStroke"
 		switchTrackStroke.Color = Theme.Stroke
+		switchTrackStroke.Transparency = 1
 		switchTrackStroke.Thickness = 1
 		switchTrackStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 		switchTrackStroke.Parent = switchTrack
@@ -1392,6 +1429,7 @@ local function create_original_elements()
 		buttonBgCorner.Parent = buttonBg
 
 		buttonBgStroke.Color = Theme.Stroke
+		buttonBgStroke.Transparency = 1
 		buttonBgStroke.Thickness = 1
 		buttonBgStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 		buttonBgStroke.Parent = buttonBg
@@ -1400,7 +1438,7 @@ local function create_original_elements()
 		buttonText.Parent = buttonBg
 		buttonText.BackgroundTransparency = 1
 		buttonText.Size = UDim2.new(1, 0, 1, 0)
-		buttonText.Font = Enum.Font.GothamMedium
+		buttonText.Font = FONT_MED
 		buttonText.Text = "Button"
 		buttonText.TextColor3 = Theme.Text
 		buttonText.TextSize = M.TextSize
@@ -1476,6 +1514,7 @@ local function create_original_elements()
 		dropdownButtonCorner.Parent = dropdownButton
 
 		dropdownButtonStroke.Color = Theme.Stroke
+		dropdownButtonStroke.Transparency = 1
 		dropdownButtonStroke.Thickness = 1
 		dropdownButtonStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 		dropdownButtonStroke.Parent = dropdownButton
@@ -1494,7 +1533,7 @@ local function create_original_elements()
 		dropdownText.BorderSizePixel = 0
 		dropdownText.ClipsDescendants = true
 		dropdownText.Size = UDim2.new(1, -26, 1, 0)
-		dropdownText.Font = Enum.Font.Gotham
+		dropdownText.Font = FONT_REG
 		dropdownText.Text = "N/A"
 		dropdownText.TextColor3 = Theme.Text
 		dropdownText.TextSize = M.TextSize
@@ -1512,9 +1551,9 @@ local function create_original_elements()
 		dropdownImage.AnchorPoint = Vector2.new(1, 0.5)
 		dropdownImage.BackgroundTransparency = 1
 		dropdownImage.BorderSizePixel = 0
-		dropdownImage.Position = UDim2.new(1, -8, 0.5, 0)
-		dropdownImage.Rotation = 180
-		dropdownImage.Size = UDim2.fromOffset(12, 12)
+		dropdownImage.Position = UDim2.new(1, -10, 0.5, 0)
+		dropdownImage.Rotation = 0
+		dropdownImage.Size = UDim2.fromOffset(10, 10)
 		dropdownImage.Image = "rbxassetid://11269835227"
 		dropdownImage.ImageColor3 = Theme.TextMuted
 
@@ -1545,6 +1584,7 @@ local function create_original_elements()
 		elementHolderCorner.Parent = elementHolder
 
 		elementHolderStroke.Color = Theme.Stroke
+		elementHolderStroke.Transparency = 0.3
 		elementHolderStroke.Thickness = 1
 		elementHolderStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 		elementHolderStroke.Parent = elementHolder
@@ -1614,7 +1654,7 @@ local function create_original_elements()
 		sliderText.BackgroundTransparency = 1
 		sliderText.Size = UDim2.new(0.65, 0, 1, 0)
 		sliderText.BorderSizePixel = 0
-		sliderText.Font = Enum.Font.Gotham
+		sliderText.Font = FONT_REG
 		sliderText.Text = "N/A"
 		sliderText.TextColor3 = Theme.Text
 		sliderText.TextSize = M.TextSize
@@ -1628,7 +1668,7 @@ local function create_original_elements()
 		numberText.AnchorPoint = Vector2.new(1, 0)
 		numberText.Position = UDim2.new(1, 0, 0, 0)
 		numberText.Size = UDim2.new(0.35, 0, 1, 0)
-		numberText.Font = Enum.Font.GothamMedium
+		numberText.Font = FONT_MED
 		numberText.PlaceholderColor3 = Theme.TextDim
 		numberText.PlaceholderText = ""
 		numberText.Text = "0"
@@ -1766,7 +1806,7 @@ local function create_original_elements()
 		searchBox.BackgroundTransparency = 1
 		searchBox.BorderSizePixel = 0
 		searchBox.Size = UDim2.new(1, -24, 1, 0)
-		searchBox.Font = Enum.Font.Gotham
+		searchBox.Font = FONT_REG
 		searchBox.PlaceholderColor3 = Theme.TextDim
 		searchBox.PlaceholderText = "Search..."
 		searchBox.Text = ""
@@ -1868,7 +1908,7 @@ local function create_original_elements()
 		nameLabel.AnchorPoint = Vector2.new(0, 0.5)
 		nameLabel.Position = UDim2.new(0, 0, 0.5, 0)
 		nameLabel.Size = UDim2.new(1, -66, 1, 0)
-		nameLabel.Font = Enum.Font.Gotham
+		nameLabel.Font = FONT_REG
 		nameLabel.Text = "N/A"
 		nameLabel.TextColor3 = Theme.Text
 		nameLabel.TextSize = M.TextSize
@@ -1897,7 +1937,7 @@ local function create_original_elements()
 		keyLabel.BackgroundTransparency = 1
 		keyLabel.BorderSizePixel = 0
 		keyLabel.Size = UDim2.new(1, 0, 1, 0)
-		keyLabel.Font = Enum.Font.GothamMedium
+		keyLabel.Font = FONT_MED
 		keyLabel.Text = "None"
 		keyLabel.TextColor3 = Theme.TextMuted
 		keyLabel.TextSize = M.TextSizeSm
@@ -1955,7 +1995,7 @@ local function create_original_elements()
 		textBoxNameText.Parent = textBox
 		textBoxNameText.BackgroundTransparency = 1
 		textBoxNameText.Size = UDim2.new(0.45, 0, 1, 0)
-		textBoxNameText.Font = Enum.Font.Gotham
+		textBoxNameText.Font = FONT_REG
 		textBoxNameText.Text = "Textbox"
 		textBoxNameText.ClipsDescendants = true
 		textBoxNameText.TextColor3 = Theme.Text
@@ -2003,7 +2043,7 @@ local function create_original_elements()
 		textBoxText.BorderSizePixel = 0
 		textBoxText.ClipsDescendants = true
 		textBoxText.Size = UDim2.new(1, 0, 1, 0)
-		textBoxText.Font = Enum.Font.Gotham
+		textBoxText.Font = FONT_REG
 		textBoxText.PlaceholderColor3 = Theme.TextDim
 		textBoxText.PlaceholderText = "Type here..."
 		textBoxText.Text = ""
@@ -2075,7 +2115,7 @@ local function create_original_elements()
 		colorWheelName.BackgroundTransparency = 1
 		colorWheelName.BorderSizePixel = 0
 		colorWheelName.Size = UDim2.new(1, -50, 1, 0)
-		colorWheelName.Font = Enum.Font.Gotham
+		colorWheelName.Font = FONT_REG
 		colorWheelName.Text = "ColorWheel"
 		colorWheelName.ClipsDescendants = true
 		colorWheelName.TextColor3 = Theme.Text
@@ -2186,7 +2226,7 @@ local function create_original_elements()
 			lbl.Parent = frame
 			lbl.BackgroundTransparency = 1
 			lbl.Size = UDim2.new(0.55, 0, 1, 0)
-			lbl.Font = Enum.Font.Gotham
+			lbl.Font = FONT_REG
 			lbl.Text = label_str
 			lbl.TextColor3 = Theme.TextMuted
 			lbl.TextSize = M.TextSizeSm
@@ -2239,7 +2279,7 @@ local function create_original_elements()
 			cv.BorderSizePixel = 0
 			cv.ClipsDescendants = true
 			cv.Size = UDim2.new(1, 0, 1, 0)
-			cv.Font = Enum.Font.Gotham
+			cv.Font = FONT_REG
 			cv.PlaceholderColor3 = Theme.TextDim
 			cv.Text = "255"
 			cv.TextColor3 = Theme.Text
@@ -2436,8 +2476,15 @@ function Library.new(windowName, constrainToScreen, width, height, visibilityKey
 	local lvp = logical_viewport()
 	local init_top = safe_top(true)
 	local fit = max_logical_size(init_top)
-	local default_w = width or (is_mobile and math.clamp(math.round(lvp.X * 0.86), 420, 700) or 660)
-	local default_h = height or (is_mobile and math.min(460, math.floor(fit.Y)) or 440)
+	local default_w, default_h
+	if is_phone then
+		-- leave the joystick / jump button visible on both sides
+		default_w = width or math.clamp(math.round(lvp.X * 0.74), 420, 640)
+		default_h = height or math.min(340, math.floor(fit.Y))
+	else
+		default_w = width or (is_mobile and math.clamp(math.round(lvp.X * 0.86), 420, 700) or 660)
+		default_h = height or (is_mobile and math.min(460, math.floor(fit.Y)) or 440)
+	end
 	local w_px, h_px = clamp_size(default_w, default_h, fit)
 
 	background.Size = UDim2.fromOffset(w_px, h_px)
@@ -2855,7 +2902,7 @@ function tabHandler:Section(sectionTitle, side)
 	local section = setmetatable({}, sectionHandler)
 	local sectionInstance = original_elements.Section:Clone()
 	local isMaximized = true
-	local resizeMinTween = tweenservice:Create(sectionInstance.Heading.ResizeButton, TweenInfo.new(0.15, Enum.EasingStyle.Quad), { Rotation = 180 })
+	local resizeMinTween = tweenservice:Create(sectionInstance.Heading.ResizeButton, TweenInfo.new(0.15, Enum.EasingStyle.Quad), { Rotation = -90 })
 	local resizeMaxTween = tweenservice:Create(sectionInstance.Heading.ResizeButton, TweenInfo.new(0.15, Enum.EasingStyle.Quad), { Rotation = 0 })
 
 	local function get_needed_height()
@@ -2865,7 +2912,11 @@ function tabHandler:Section(sectionTitle, side)
 		return math.max(M.SectionHead + 12, sectionInstance.Heading.Size.Y.Offset + content_y)
 	end
 
+	self._sectionCount = (self._sectionCount or 0) + 1
+	sectionInstance.LayoutOrder = self._sectionCount
+
 	local function get_target_column()
+		if is_phone then return self.ElementToParentChildren.LeftScrollingFrame end
 		if side and type(side) == "string" then
 			local s = side:lower()
 			if s == "left" then return self.ElementToParentChildren.LeftScrollingFrame end
@@ -2942,7 +2993,7 @@ function tabHandler:Section(sectionTitle, side)
 	sectionInstance.AncestryChanged:Connect(function(_, parent)
 		if not parent then window_resize_listeners[queue_section_resize] = nil end
 	end)
-	sectionInstance.Heading.Title.Text = sectionTitle or "Section"
+	sectionInstance.Heading.Title.Text = string.upper(tostring(sectionTitle or "Section"))
 	sectionInstance.Parent = get_target_column()
 	queue_section_resize()
 
@@ -3133,8 +3184,8 @@ function elementHandler:Dropdown(dropdownName, optionsOrCallback, callbackOrFlag
 
 	local syncKey = resolve_sync_flag(flag, dropdownName, callback)
 
-	local imgOpenTween = tweenservice:Create(dropdownInstance.DropdownButton.ButtonBackground.DropdownImage, TweenInfo.new(0.2, Enum.EasingStyle.Quad), { Rotation = 0 })
-	local imgCloseTween = tweenservice:Create(dropdownInstance.DropdownButton.ButtonBackground.DropdownImage, TweenInfo.new(0.2, Enum.EasingStyle.Quad), { Rotation = 180 })
+	local imgOpenTween = tweenservice:Create(dropdownInstance.DropdownButton.ButtonBackground.DropdownImage, TweenInfo.new(0.2, Enum.EasingStyle.Quad), { Rotation = 180 })
+	local imgCloseTween = tweenservice:Create(dropdownInstance.DropdownButton.ButtonBackground.DropdownImage, TweenInfo.new(0.2, Enum.EasingStyle.Quad), { Rotation = 0 })
 	local closeTween = tweenservice:Create(dropdownInstance, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), { Size = UDim2.new(1, 0, 0, M.ElementH) })
 
 	local function get_open_heights()
@@ -3269,7 +3320,10 @@ function dropdownHandler:_highlightOption(selectedVal)
 			local strk = bg and bg:FindFirstChildWhichIsA("UIStroke")
 			local isSel = (optKey == selStr)
 			if txt then txt.TextColor3 = isSel and Theme.AccentBright or Theme.Text end
-			if strk then strk.Color = isSel and Theme.Accent or Theme.Stroke end
+			if strk then
+				strk.Color = isSel and Theme.Accent or Theme.Stroke
+				strk.Transparency = isSel and 0.35 or 1
+			end
 		end
 	end
 end
@@ -4150,10 +4204,10 @@ do
 		titleLbl.BackgroundTransparency = 1
 		titleLbl.Position = UDim2.fromOffset(10, 0)
 		titleLbl.Size = UDim2.new(1, -20, 1, -1)
-		titleLbl.Font = Enum.Font.GothamBold
+		titleLbl.Font = FONT_SEMI
 		titleLbl.Text = titleStr
 		titleLbl.TextColor3 = Theme.TextBright
-		titleLbl.TextSize = 12
+		titleLbl.TextSize = 13
 		titleLbl.TextXAlignment = Enum.TextXAlignment.Left
 		titleLbl.TextTruncate = Enum.TextTruncate.AtEnd
 		titleLbl.ZIndex = 3
@@ -4164,10 +4218,10 @@ do
 		bodyLbl.BackgroundTransparency = 1
 		bodyLbl.Position = UDim2.fromOffset(12, 27)
 		bodyLbl.Size = UDim2.new(1, -22, 1, -33)
-		bodyLbl.Font = Enum.Font.Gotham
+		bodyLbl.Font = FONT_REG
 		bodyLbl.Text = bodyStr
 		bodyLbl.TextColor3 = Theme.Text
-		bodyLbl.TextSize = 12
+		bodyLbl.TextSize = 13
 		bodyLbl.TextWrapped = true
 		bodyLbl.TextXAlignment = Enum.TextXAlignment.Left
 		bodyLbl.TextYAlignment = Enum.TextYAlignment.Top
@@ -4282,8 +4336,8 @@ do
 		local cardW = is_mobile and math.min(260, math.round(logical_viewport().X * 0.76)) or 276
 		local textParams = Instance.new("GetTextBoundsParams")
 		textParams.Text = message
-		textParams.Font = Font.fromEnum(Enum.Font.Gotham)
-		textParams.Size = 12
+		textParams.Font = Font.fromEnum(FONT_REG)
+		textParams.Size = 13
 		textParams.Width = math.max(110, cardW - 26)
 		local okBounds, bounds = pcall(function() return textservice:GetTextBoundsAsync(textParams) end)
 		local textH = (okBounds and bounds and bounds.Y) or 16
@@ -4808,7 +4862,7 @@ function toggleHandler:BindKey(arg, defaultKeyName)
 	keyBtn.BackgroundColor3 = Theme.Element
 	keyBtn.BorderSizePixel = 0
 	keyBtn.AutoButtonColor = false
-	keyBtn.Font = Enum.Font.GothamMedium
+	keyBtn.Font = FONT_MED
 	keyBtn.Text = "None"
 	keyBtn.TextColor3 = Theme.TextMuted
 	keyBtn.TextSize = M.TextSizeSm - 1
@@ -5491,7 +5545,7 @@ do
 		lbl.Font = font
 		lbl.Text = text
 		lbl.TextColor3 = color
-		lbl.TextSize = 12
+		lbl.TextSize = 13
 		lbl.LayoutOrder = order
 		return lbl
 	end
@@ -5515,17 +5569,17 @@ do
 		return wrap
 	end
 
-	local lblBrand = add_text("BSMT", Theme.Accent, Enum.Font.GothamBold, 1)
+	local lblBrand = add_text("BSMT", Theme.Accent, FONT_SEMI, 1)
 	add_sep(2)
-	local lblUser = add_text(player.Name, Theme.Text, Enum.Font.GothamMedium, 3)
+	local lblUser = add_text(player.Name, Theme.Text, FONT_MED, 3)
 	local sepUser = add_sep(4)
-	local lblFpsVal = add_text("--", Theme.TextBright, Enum.Font.GothamBold, 5)
-	add_text(" fps", Theme.TextMuted, Enum.Font.Gotham, 6)
+	local lblFpsVal = add_text("--", Theme.TextBright, FONT_SEMI, 5)
+	add_text(" fps", Theme.TextMuted, FONT_REG, 6)
 	add_sep(7)
-	local lblPingVal = add_text("--", Theme.TextBright, Enum.Font.GothamBold, 8)
-	add_text(" ms", Theme.TextMuted, Enum.Font.Gotham, 9)
+	local lblPingVal = add_text("--", Theme.TextBright, FONT_SEMI, 8)
+	add_text(" ms", Theme.TextMuted, FONT_REG, 9)
 	local sepTime = add_sep(10)
-	local lblTime = add_text("00:00", Theme.TextMuted, Enum.Font.GothamMedium, 11)
+	local lblTime = add_text("00:00", Theme.TextMuted, FONT_MED, 11)
 
 	-- On narrow screens drop the username / uptime so the bar stays short
 	local function apply_wm_compact()
@@ -5567,7 +5621,7 @@ do
 			wmDragging = true
 			wmDragInput = input
 			wmDragStart = Vector2.new(input.Position.X, input.Position.Y)
-			wmStartPos = Vector2.new(outer.AbsolutePosition.X, outer.AbsolutePosition.Y)
+			wmStartPos = abs_to_gui(outer.AbsolutePosition)
 			outer.AnchorPoint = Vector2.new(0, 0)
 			outer.Position = UDim2.fromOffset(wmStartPos.X, wmStartPos.Y)
 			wmCustomPos = true
@@ -5641,7 +5695,7 @@ do
 		apply_wm_compact()
 		if wmCustomPos then
 			task.defer(function()
-				local ap = outer.AbsolutePosition
+				local ap = abs_to_gui(outer.AbsolutePosition)
 				outer.AnchorPoint = Vector2.new(0, 0)
 				outer.Position = UDim2.fromOffset(clamp_wm(ap.X, ap.Y))
 			end)
@@ -5722,7 +5776,7 @@ do
 		GetTopReserve = function()
 			if not wmVisible or not outer.Parent then return nil end
 			local vp = get_viewport()
-			local ap, as = outer.AbsolutePosition, outer.AbsoluteSize
+			local ap, as = abs_to_gui(outer.AbsolutePosition), outer.AbsoluteSize
 			local h = math.max(as.Y, 26 * get_ui_scale())
 			if ap.Y + h / 2 > vp.Y / 2 then return nil end
 			return ap.Y + h + 6
