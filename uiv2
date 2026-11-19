@@ -187,7 +187,7 @@ local function start_genv_watch()
 				end
 			end
 			if not any then break end
-			task.wait(0.04)
+			task.wait(0.15)
 		end
 		genv_watch_started = false
 	end)
@@ -2832,26 +2832,28 @@ function elementHandler:Remove()
 	self.GuiToRemove:Destroy()
 end
 
-local function refresh_container_badges(inst)
-	if not inst then return end
-	local sec_frame = inst
-	while sec_frame and sec_frame.Name ~= "Section" do
-		sec_frame = sec_frame.Parent
-	end
-	if sec_frame then
-		local holder = sec_frame:FindFirstChild("ElementHolder")
-		local head = sec_frame:FindFirstChild("Heading")
-		local badge = head and head:FindFirstChild("ActiveBadge")
-		if holder and badge then
-			local count = 0
-			for _, d in ipairs(holder:GetDescendants()) do
-				if d.Name == "SwitchTrack" and d:FindFirstChild("TrackGradient") and d.TrackGradient.Enabled then
-					count += 1
+local badge_refresh_queued = false
+local dirty_badge_sections = {}
+
+local function run_badge_refresh()
+	badge_refresh_queued = false
+	for sec_frame in pairs(dirty_badge_sections) do
+		dirty_badge_sections[sec_frame] = nil
+		if sec_frame and sec_frame.Parent then
+			local holder = sec_frame:FindFirstChild("ElementHolder")
+			local head = sec_frame:FindFirstChild("Heading")
+			local badge = head and head:FindFirstChild("ActiveBadge")
+			if holder and badge then
+				local count = 0
+				for _, d in ipairs(holder:GetDescendants()) do
+					if d.Name == "SwitchTrack" and d:FindFirstChild("TrackGradient") and d.TrackGradient.Enabled then
+						count += 1
+					end
 				end
-			end
-			badge.Visible = count > 0
-			if badge:FindFirstChild("BadgeText") then
-				badge.BadgeText.Text = tostring(count) .. " ON"
+				badge.Visible = count > 0
+				if badge:FindFirstChild("BadgeText") then
+					badge.BadgeText.Text = tostring(count) .. " ON"
+				end
 			end
 		end
 	end
@@ -2872,6 +2874,22 @@ local function refresh_container_badges(inst)
 				end
 			end
 		end
+	end
+end
+
+local function refresh_container_badges(inst)
+	if inst then
+		local sec_frame = inst
+		while sec_frame and sec_frame.Name ~= "Section" do
+			sec_frame = sec_frame.Parent
+		end
+		if sec_frame then
+			dirty_badge_sections[sec_frame] = true
+		end
+	end
+	if not badge_refresh_queued then
+		badge_refresh_queued = true
+		task.defer(run_badge_refresh)
 	end
 end
 
@@ -4238,26 +4256,41 @@ function elementHandler:Slider(sliderName, callback, maximumValue, minimumValue,
 		callback(rounded)
 	end
 
+	local moveConn, endConn
+
+	local function stop_slider_drag()
+		isDragging = false
+		if moveConn then
+			live_connections[moveConn] = nil
+			moveConn:Disconnect()
+			moveConn = nil
+		end
+		if endConn then
+			live_connections[endConn] = nil
+			endConn:Disconnect()
+			endConn = nil
+		end
+		set_scroll_lock(sliderInstance, false)
+	end
+
 	sliderInstance.SliderBackground.InputBegan:Connect(function(input)
 		if is_primary_input(input) then
+			stop_slider_drag()
 			isDragging = true
 			set_scroll_lock(sliderInstance, true)
 			apply_from_x(input.Position.X)
+			moveConn = track_conn(uis.InputChanged:Connect(function(inp)
+				if isDragging and is_move_input(inp) then
+					apply_from_x(inp.Position.X)
+				end
+			end))
+			endConn = track_conn(uis.InputEnded:Connect(function(inp)
+				if is_primary_input(inp) then
+					stop_slider_drag()
+				end
+			end))
 		end
 	end)
-
-	track_conn(uis.InputChanged:Connect(function(input)
-		if isDragging and is_move_input(input) then
-			apply_from_x(input.Position.X)
-		end
-	end))
-
-	track_conn(uis.InputEnded:Connect(function(input)
-		if isDragging and is_primary_input(input) then
-			isDragging = false
-			set_scroll_lock(sliderInstance, false)
-		end
-	end))
 
 	sliderInstance.TextGrouping.NumberText.FocusLost:Connect(function(enterPressed)
 		if enterPressed then
@@ -4747,11 +4780,45 @@ function elementHandler:ColorWheel(colorWheelName, callback, flag)
 		end
 	end)
 
+	local cwMoveConn, cwEndConn
+
+	local function stop_cw_drag()
+		draggingSlider = false
+		draggingWheel = false
+		if cwMoveConn then
+			live_connections[cwMoveConn] = nil
+			cwMoveConn:Disconnect()
+			cwMoveConn = nil
+		end
+		if cwEndConn then
+			live_connections[cwEndConn] = nil
+			cwEndConn:Disconnect()
+			cwEndConn = nil
+		end
+		set_scroll_lock(colorWheelInstance, false)
+	end
+
+	local function bind_cw_drag()
+		if cwMoveConn then return end
+		cwMoveConn = track_conn(uis.InputChanged:Connect(function(inp)
+			if is_move_input(inp) then
+				if draggingSlider then apply_slider_from_x(inp.Position.X) end
+				if draggingWheel then apply_ring_from_xy(inp.Position.X, inp.Position.Y) end
+			end
+		end))
+		cwEndConn = track_conn(uis.InputEnded:Connect(function(inp)
+			if is_primary_input(inp) then
+				stop_cw_drag()
+			end
+		end))
+	end
+
 	slider.InputBegan:Connect(function(inp)
 		if is_primary_input(inp) then
 			draggingSlider = true
 			set_scroll_lock(colorWheelInstance, true)
 			apply_slider_from_x(inp.Position.X)
+			bind_cw_drag()
 		end
 	end)
 
@@ -4760,23 +4827,9 @@ function elementHandler:ColorWheel(colorWheelName, callback, flag)
 			draggingWheel = true
 			set_scroll_lock(colorWheelInstance, true)
 			apply_ring_from_xy(inp.Position.X, inp.Position.Y)
+			bind_cw_drag()
 		end
 	end)
-
-	track_conn(uis.InputChanged:Connect(function(inp)
-		if is_move_input(inp) then
-			if draggingSlider then apply_slider_from_x(inp.Position.X) end
-			if draggingWheel then apply_ring_from_xy(inp.Position.X, inp.Position.Y) end
-		end
-	end))
-
-	track_conn(uis.InputEnded:Connect(function(inp)
-		if is_primary_input(inp) and (draggingSlider or draggingWheel) then
-			draggingSlider = false
-			draggingWheel = false
-			set_scroll_lock(colorWheelInstance, false)
-		end
-	end))
 
 	local function on_rgb_lost_focus(tb, channel)
 		local cur = Color3.fromHSV(hue, saturation, value)
@@ -6532,45 +6585,65 @@ do
 	local wmConn
 	local wmVisible = true
 	local frameCount = 0
-	local lastFpsTime = tick()
+	local lastFpsTime = os.clock()
 	local pingTimer = 0
-	local lastTimeStr = nil
+	local lastTimeStr = ""
+	local lastFpsLen = 0
+	local lastPingLen = 0
 
 	local function update_watermark(dt)
-		local now = tick()
+		local now = os.clock()
 		frameCount += 1
-		if now - lastFpsTime >= 0.45 then
+		if now - lastFpsTime >= 0.5 then
 			local fps = math.round(frameCount / (now - lastFpsTime))
 			frameCount = 0
 			lastFpsTime = now
-			lblFpsVal.Text = tostring(fps)
+			local s = tostring(fps)
+			lblFpsVal.Text = s
+			if #s ~= lastFpsLen then
+				lastFpsLen = #s
+				sync_wm_width()
+			end
 		end
 
 		pingTimer += dt
-		if pingTimer >= 0.8 then
+		if pingTimer >= 1.0 then
 			pingTimer = 0
+			local widthChanged = false
 			local ok, rawPing = pcall(function()
 				return math.round(stats.Network.ServerStatsItem["Data Ping"]:GetValue())
 			end)
 			if ok and rawPing then
-				lblPingVal.Text = tostring(rawPing)
+				local ps = tostring(rawPing)
+				lblPingVal.Text = ps
+				if #ps ~= lastPingLen then
+					lastPingLen = #ps
+					widthChanged = true
+				end
 			end
-			local uptimeStr = format_uptime(now - scriptStartTime)
+			local uptimeStr = format_uptime(tick() - scriptStartTime)
 			if uptimeStr ~= lastTimeStr then
+				if #uptimeStr ~= #lastTimeStr then widthChanged = true end
 				lastTimeStr = uptimeStr
 				lblTime.Text = uptimeStr
 			end
-			sync_wm_width()
+			if widthChanged then
+				sync_wm_width()
+			end
 		end
 	end
 
 	local function start_watermark()
 		if wmConn then return end
-		wmConn = runservice.Heartbeat:Connect(update_watermark)
+		wmConn = track_conn(runservice.Heartbeat:Connect(update_watermark))
 	end
 
 	local function stop_watermark()
-		if wmConn then wmConn:Disconnect() wmConn = nil end
+		if wmConn then
+			live_connections[wmConn] = nil
+			wmConn:Disconnect()
+			wmConn = nil
+		end
 	end
 
 	local function set_watermark_visible(v)
